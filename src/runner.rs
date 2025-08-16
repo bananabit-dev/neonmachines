@@ -106,7 +106,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
             // Call the LLM
             let api_key = std::env::var("API_KEY").unwrap_or_default();
-            let _ = log_tx.send(AppEvent::RunResult(format!("Error: {}", api_key)));
+            //dbg let _ = log_tx.send(AppEvent::RunResult(format!("Error: {}", api_key)));
             let base_url = "https://openrouter.ai/api/v1/chat/completions".to_string();
             let model = "z-ai/glm-4.5".to_string();
             let temperature = 0.1;
