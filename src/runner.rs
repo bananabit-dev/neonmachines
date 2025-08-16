@@ -69,6 +69,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.model.clone(),
                             cfg.temperature,
                             row.max_iterations,
+                            log_tx.clone(), // ✅ pass tx
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -79,6 +80,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.model.clone(),
                             cfg.temperature,
                             row.max_iterations,
+                            log_tx.clone(), // ✅ pass tx
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
                         let failure_route = row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
@@ -182,6 +184,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.model.clone(),
                             cfg.temperature,
                             row.max_iterations,
+                            log_tx.clone(),
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -192,6 +195,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.model.clone(),
                             cfg.temperature,
                             row.max_iterations,
+                            log_tx.clone(),
                         );
                         Box::new(PomlValidatorAgent::new(poml_validator, row.on_success.unwrap_or(-1), row.on_failure.unwrap_or(-1)))
                     }

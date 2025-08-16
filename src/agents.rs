@@ -63,6 +63,7 @@ pub struct PomlAgent {
     pub model: String,
     pub temperature: f32,
     pub max_iterations: usize,
+    pub tx: UnboundedSender<AppEvent>, // ✅ logging channel
 }
 
 impl PomlAgent {
@@ -72,6 +73,7 @@ impl PomlAgent {
         model: String,
         temperature: f32,
         max_iterations: usize,
+        tx: UnboundedSender<AppEvent>,
     ) -> Self {
         Self {
             name: name.to_string(),
@@ -79,6 +81,7 @@ impl PomlAgent {
             model,
             temperature,
             max_iterations,
+            tx,
         }
     }
 
@@ -159,21 +162,55 @@ impl Agent for PomlAgent {
                     });
 
                     if let Some(tool_calls) = &msg.tool_calls {
+                        let mut tool_outputs = Vec::new();
                         for tc in tool_calls {
+                            // ✅ Log tool call
+                            let _ = self.tx.send(AppEvent::Log(format!(
+                                "Agent {} calling tool '{}' with args: {}",
+                                self.name,
+                                tc.function.name,
+                                tc.function.arguments
+                            )));
+
                             let result = tool_registry.execute_tool(
                                 &tc.function.name,
                                 &tc.function.arguments,
                             );
                             let content = match result {
-                                Ok(v) => serde_json::to_string(&v).unwrap(),
-                                Err(e) => format!("Error: {}", e),
+                                Ok(v) => {
+                                    let json = serde_json::to_string(&v).unwrap();
+                                    let _ = self.tx.send(AppEvent::Log(format!(
+                                        "Agent {} tool '{}' result: {}",
+                                        self.name,
+                                        tc.function.name,
+                                        json
+                                    )));
+                                    json
+                                }
+                                Err(e) => {
+                                    let err = format!("Error: {}", e);
+                                    let _ = self.tx.send(AppEvent::Log(format!(
+                                        "Agent {} tool '{}' failed: {}",
+                                        self.name,
+                                        tc.function.name,
+                                        e
+                                    )));
+                                    err
+                                }
                             };
+                            tool_outputs.push(format!("Tool {} result: {}", tc.function.name, content));
                             messages.push(Message {
                                 role: "tool".into(),
                                 content: Some(content),
                                 tool_calls: None,
                             });
                         }
+
+                        // If no assistant content, return tool outputs
+                        if msg.content.is_none() {
+                            return (tool_outputs.join("\n"), None);
+                        }
+
                         continue;
                     }
 
