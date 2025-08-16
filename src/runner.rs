@@ -1,7 +1,7 @@
 use crate::agents::{PomlAgent, ChainedAgent, PomlValidatorAgent};
-use crate::tools::builtin_tools_with_history;
+use crate::tools::builtin_tools_with_history; // ✅ fixed import
 use crate::nm_config::{WorkflowConfig, AgentType};
-use crate::shared_history::SharedHistory;   // ✅ NEW
+use crate::shared_history::SharedHistory;
 use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -30,26 +30,44 @@ pub enum AppEvent {
 
 pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
     match cmd {
-        AppCommand::RunWorkflow { workflow_name, prompt, cfg, start_agent } => {
+        AppCommand::RunWorkflow {
+            workflow_name,
+            prompt,
+            cfg,
+            start_agent,
+        } => {
             let _ = log_tx.send(AppEvent::RunStart(workflow_name.clone()));
-            let _ = log_tx.send(AppEvent::Log(format!("Starting workflow: {}", workflow_name)));
-            let _ = log_tx.send(AppEvent::Log(format!("Model: {}, Temperature: {}", cfg.model, cfg.temperature)));
-            let _ = log_tx.send(AppEvent::Log(format!("Max traversals: {}", cfg.maximum_traversals)));
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Starting workflow: {}",
+                workflow_name
+            )));
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Model: {}, Temperature: {}",
+                cfg.model, cfg.temperature
+            )));
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Max traversals: {}",
+                cfg.maximum_traversals
+            )));
 
             let mut graph = Graph::new();
 
             // ✅ Create shared history
             let shared_history = SharedHistory::new();
-            let _ = log_tx.send(AppEvent::Log("[SharedHistory] Initialized global shared history".to_string()));
+            let _ = log_tx.send(AppEvent::Log(
+                "[SharedHistory] Initialized global shared history".to_string(),
+            ));
 
-            // Register tools
-            let _ = log_tx.send(AppEvent::Log("Registering tools...".to_string()));
-            for (tool, func) in builtin_tools_with_history(shared_history.clone()) {
+            // ✅ Register tools with shared history + tx
+            for (tool, func) in builtin_tools_with_history(shared_history.clone(), log_tx.clone()) {
                 graph.register_tool(tool, func);
             }
 
             // Build graph nodes
-            let _ = log_tx.send(AppEvent::Log(format!("Building graph with {} agents", cfg.rows.len())));
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Building graph with {} agents",
+                cfg.rows.len()
+            )));
             for (i, row) in cfg.rows.iter().enumerate() {
                 let next_id = if i + 1 < cfg.rows.len() {
                     Some((i + 1) as i32)
@@ -67,7 +85,8 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
                 let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
                     AgentType::Agent | AgentType::ParallelAgent => {
-                        let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
+                        let files: Vec<String> =
+                            row.files.split(';').map(|s| s.trim().to_string()).collect();
                         Box::new(PomlAgent::new(
                             &format!("Agent{}", i + 1),
                             files,
@@ -78,7 +97,8 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                         ))
                     }
                     AgentType::ValidatorAgent => {
-                        let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
+                        let files: Vec<String> =
+                            row.files.split(';').map(|s| s.trim().to_string()).collect();
                         let poml_validator = PomlAgent::new(
                             &format!("ValidatorAgent{}", i + 1),
                             files,
@@ -88,26 +108,47 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             log_tx.clone(),
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
-                        let failure_route = row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
+                        let failure_route =
+                            row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
 
                         let _ = log_tx.send(AppEvent::Log(format!(
                             "ValidatorAgent{}: success_route={}, failure_route={}",
                             i + 1,
-                            if success_route == -1 { "END".to_string() } else { (success_route + 1).to_string() },
-                            if failure_route == -1 { "END".to_string() } else { (failure_route + 1).to_string() }
+                            if success_route == -1 {
+                                "END".to_string()
+                            } else {
+                                (success_route + 1).to_string()
+                            },
+                            if failure_route == -1 {
+                                "END".to_string()
+                            } else {
+                                (failure_route + 1).to_string()
+                            }
                         )));
 
-                        Box::new(PomlValidatorAgent::new(poml_validator, success_route, failure_route))
+                        Box::new(PomlValidatorAgent::new(
+                            poml_validator,
+                            success_route,
+                            failure_route,
+                        ))
                     }
                 };
 
                 // ✅ Pass shared_history into ChainedAgent
-                let chained = ChainedAgent::new(agent, next_id, i as i32, log_tx.clone(), shared_history.clone());
+                let chained = ChainedAgent::new(
+                    agent,
+                    next_id,
+                    i as i32,
+                    log_tx.clone(),
+                    shared_history.clone(),
+                );
                 graph.add_node(i as i32, Box::new(chained));
             }
 
             // Execute workflow
-            let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
+            let _ = log_tx.send(AppEvent::Log(
+                "Starting workflow execution...".to_string(),
+            ));
             let mut traversals = 0;
             let mut output = String::new();
             let mut current_input = prompt.clone();
@@ -115,7 +156,10 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
             loop {
                 if traversals >= cfg.maximum_traversals {
-                    let msg = format!("[Traversal limit reached: {} traversals]", cfg.maximum_traversals);
+                    let msg = format!(
+                        "[Traversal limit reached: {} traversals]",
+                        cfg.maximum_traversals
+                    );
                     let _ = log_tx.send(AppEvent::Log(msg.clone()));
                     output.push_str(&format!("\n{}", msg));
                     break;
@@ -124,7 +168,9 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
                 let _ = log_tx.send(AppEvent::Log(format!(
                     "Traversal {}: Running node {} with input length {}",
-                    traversals, current_node + 1, current_input.len()
+                    traversals,
+                    current_node + 1,
+                    current_input.len()
                 )));
 
                 let mut step_output = graph.run(current_node, &current_input).await;
@@ -153,14 +199,17 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                     Some(next) if next >= 0 => {
                         let _ = log_tx.send(AppEvent::Log(format!(
                             "Traversal {}: Transitioning from node {} to node {}",
-                            traversals, current_node + 1, next + 1
+                            traversals,
+                            current_node + 1,
+                            next + 1
                         )));
                         current_node = next;
                     }
                     _ => {
                         let _ = log_tx.send(AppEvent::Log(format!(
                             "Traversal {}: No valid routing from node {}, ending workflow",
-                            traversals, current_node + 1
+                            traversals,
+                            current_node + 1
                         )));
                         break;
                     }
@@ -169,22 +218,33 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
             let _ = log_tx.send(AppEvent::RunResult(format!(
                 "Workflow completed after {} traversal(s)\nFinal output:\n{}",
-                traversals,
-                output
+                traversals, output
             )));
             let _ = log_tx.send(AppEvent::RunEnd(workflow_name));
         }
 
-        AppCommand::ShowHistory { workflow_name, agent_index, cfg } => {
-            let _ = log_tx.send(AppEvent::Log(format!("Showing history for workflow '{}'", workflow_name)));
+        AppCommand::ShowHistory {
+            workflow_name,
+            agent_index,
+            cfg,
+        } => {
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Showing history for workflow '{}'",
+                workflow_name
+            )));
 
             let mut graph = Graph::new();
-            let shared_history = SharedHistory::new(); // ✅ also create for history inspection
+            let shared_history = SharedHistory::new();
             for (i, row) in cfg.rows.iter().enumerate() {
-                let next_id = if i + 1 < cfg.rows.len() { Some((i + 1) as i32) } else { None };
+                let next_id = if i + 1 < cfg.rows.len() {
+                    Some((i + 1) as i32)
+                } else {
+                    None
+                };
                 let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
                     AgentType::Agent | AgentType::ParallelAgent => {
-                        let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
+                        let files: Vec<String> =
+                            row.files.split(';').map(|s| s.trim().to_string()).collect();
                         Box::new(PomlAgent::new(
                             &format!("Agent{}", i + 1),
                             files,
@@ -195,7 +255,8 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                         ))
                     }
                     AgentType::ValidatorAgent => {
-                        let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
+                        let files: Vec<String> =
+                            row.files.split(';').map(|s| s.trim().to_string()).collect();
                         let poml_validator = PomlAgent::new(
                             &format!("ValidatorAgent{}", i + 1),
                             files,
@@ -204,10 +265,20 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             row.max_iterations,
                             log_tx.clone(),
                         );
-                        Box::new(PomlValidatorAgent::new(poml_validator, row.on_success.unwrap_or(-1), row.on_failure.unwrap_or(-1)))
+                        Box::new(PomlValidatorAgent::new(
+                            poml_validator,
+                            row.on_success.unwrap_or(-1),
+                            row.on_failure.unwrap_or(-1),
+                        ))
                     }
                 };
-                let chained = ChainedAgent::new(agent, next_id, i as i32, log_tx.clone(), shared_history.clone());
+                let chained = ChainedAgent::new(
+                    agent,
+                    next_id,
+                    i as i32,
+                    log_tx.clone(),
+                    shared_history.clone(),
+                );
                 graph.add_node(i as i32, Box::new(chained));
             }
 
