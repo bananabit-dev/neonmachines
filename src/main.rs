@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use std::process::Command;
 
 use async_trait::async_trait;
 use dotenv::dotenv;
@@ -27,16 +28,20 @@ impl Agent for FirstAgent {
         let base_url = "https://openrouter.ai/api/v1/chat/completions".to_string();
         let model = "z-ai/glm-4.5".to_string();
         let temperature = 0.1;
+        let security_check_prompt =  Command::new("python").args(["-m", "poml", "-f","prompts/security_check.poml"]).output();
+        print!("{:?}",security_check_prompt);
+        let files_user_prompt =  Command::new("python").args(["-m", "poml", "-f","prompts/get_files.poml"]).output();
+
 
         let mut messages = vec![
             Message {
                 role: "system".to_string(),
-                content: Some("You are a helpful assistant. Use the available tools if needed.".to_string()),
+                content: Some(format!("{:?}",security_check_prompt.unwrap())),
                 tool_calls: None,
             },
             Message {
                 role: "user".to_string(),
-                content: Some(input.to_string()),
+                content: Some(format!("{:?}",files_user_prompt.unwrap())),
                 tool_calls: None,
             },
         ];
@@ -94,7 +99,7 @@ impl Agent for FirstAgent {
 
             // If we got plain text, return it
             if let Some(content) = &assistant_message.content {
-                return (format!("First processed: {}", content), Some(1));
+                return (format!("Write a summary of what needs to be changed reading this json: {}", content), Some(1));
             }
         }
 
