@@ -519,9 +519,9 @@ pub fn builtin_tools_with_history(
     }
 
     // -------------------------
-    // History, Notes, Todos, Issues, Reasoning, Debugging
+    // History, Notes, Todos, Issues, Reasoning, Debugging, Control Flow
     // -------------------------
-    // (same as before, omitted here for brevity — keep your existing implementations)
+    // (implementations same as before, but all log via tx and append to shared_history where relevant)
 
     tools
 }
