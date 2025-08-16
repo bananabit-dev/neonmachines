@@ -1,12 +1,8 @@
-use crate::agents::{FirstAgent, SecondAgent};
-use crate::nm_config::{AgentType, WorkflowConfig};
-use dotenv::dotenv;
-use llmgraph::generate::generate::generate_full_response;
-use llmgraph::models::tools::{Function, LLMResponse, Parameters};
-use llmgraph::{Graph, Message, Tool};
-use serde_json::json;
-use std::collections::HashMap;
-use std::process::Command;
+use crate::agents::PomlAgent;
+use crate::tools::builtin_tools;
+use crate::nm_config::WorkflowConfig;
+use llmgraph::Graph;
+use llmgraph::agents::StatefulAgent;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug)]
@@ -26,135 +22,45 @@ pub enum AppEvent {
     RunEnd(String),
 }
 
-fn run_poml_file(file: &str) -> String {
-    let path = format!("./prompts/{}", file);
-    match Command::new("python")
-        .args(["-m", "poml", "-f", &path])
-        .output()
-    {
-        Ok(output) => {
-            if output.status.success() {
-                String::from_utf8_lossy(&output.stdout).to_string()
-            } else {
-                format!(
-                    "Error running {}: {}",
-                    path,
-                    String::from_utf8_lossy(&output.stderr)
-                )
-            }
-        }
-        Err(e) => format!("Failed to run {}: {}", path, e),
-    }
-}
-
 pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
-    match cmd {
-        AppCommand::RunWorkflow {
-            workflow_name,
-            prompt,
-            cfg,
-        } => {
-            let _ = log_tx.send(AppEvent::RunStart(workflow_name.clone()));
+    if let AppCommand::RunWorkflow { workflow_name, prompt, cfg } = cmd {
+        let _ = log_tx.send(AppEvent::RunStart(workflow_name.clone()));
 
-            // Build messages from files mapping
-            let mut messages: Vec<Message> = Vec::new();
+        let mut graph = Graph::new();
 
-            if let Some(row) = cfg.rows.get(cfg.active_agent_index) {
-                if !row.files.trim().is_empty() {
-                    for part in row.files.split(';') {
-                        let part = part.trim();
-                        if part.is_empty() {
-                            continue;
-                        }
-                        if let Some(rest) = part.strip_prefix("role:") {
-                            if let Some((role, files)) = rest.split_once(':') {
-                                let mut content = String::new();
-                                for file in files.split(',') {
-                                    let file = file.trim();
-                                    if !file.is_empty() {
-                                        let out = run_poml_file(file);
-                                        content.push_str(&format!(
-                                            "\n[{} -> {}]\n{}",
-                                            role, file, out
-                                        ));
-                                    }
-                                }
-                                messages.push(Message {
-                                    role: role.trim().to_string(),
-                                    content: Some(content),
-                                    tool_calls: None,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
+        // Register builtin tools
+        for (tool, func) in builtin_tools() {
+            graph.register_tool(tool, func);
+        }
 
-            // Always prepend the user input as the first message
-            messages.insert(
-                0,
-                Message {
-                    role: "user".into(),
-                    content: Some(prompt),
-                    tool_calls: None,
-                },
+        // Build agents from workflow config
+        for (i, row) in cfg.rows.iter().enumerate() {
+            let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
+            let poml_agent = PomlAgent::new(
+                &format!("Agent{}", i + 1),
+                files,
+                cfg.model.clone(),
+                cfg.temperature,
             );
 
-            // Log that we are sending to AI
-            let _ = log_tx.send(AppEvent::Log("Sending API request…".into()));
-            dotenv().ok();
+            // Wrap PomlAgent in StatefulAgent to forward output
+            let mut stateful = StatefulAgent::new(format!("StatefulAgent{}", i + 1));
+            stateful = stateful.with_processor(Box::new(move |input, _state| {
+                // run PomlAgent synchronously? no, we can't here
+                // Instead, just forward input (Graph will call PomlAgent::run)
+                (input.to_string(), Some(-1))
+            }));
 
-            // Call the LLM
-            let api_key = std::env::var("API_KEY").unwrap_or_default();
-            //dbg let _ = log_tx.send(AppEvent::RunResult(format!("Error: {}", api_key)));
-            let base_url = "https://openrouter.ai/api/v1/chat/completions".to_string();
-            let model = "z-ai/glm-4.5".to_string();
-            let temperature = 0.1;
-
-            match generate(
-                base_url,
-                api_key,
-                model,
-                temperature,
-                messages.clone(),
-                None,
-            )
-            .await
-            {
-                Ok(resp) => {
-                    if let Some(choice) = resp.choices.first() {
-                        if let Some(content) = &choice.message.content {
-                            let _ = log_tx.send(AppEvent::RunResult(content.clone()));
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = log_tx.send(AppEvent::RunResult(format!("Error: {}", e)));
-                }
+            // Instead of using processor, we can just add PomlAgent directly
+            // but we want chaining, so we wrap
+            graph.add_node(i as i32, Box::new(poml_agent));
+            if i > 0 {
+                let _ = graph.add_edge((i - 1) as i32, i as i32);
             }
-
-            let _ = log_tx.send(AppEvent::RunEnd(workflow_name));
         }
-    }
-}
 
-async fn generate(
-    base_url: String,
-    api_key: String,
-    model: String,
-    temperature: f32,
-    messages: Vec<Message>,
-    tools: Option<Vec<Tool>>,
-) -> Result<LLMResponse, reqwest::Error> {
-    let response = generate_full_response(
-        base_url,
-        api_key,
-        model,
-        temperature,
-        messages.clone(),
-        tools,
-    )
-    .await;
-    dbg!(&response);
-    response
+        let output = graph.run(0, &prompt).await;
+        let _ = log_tx.send(AppEvent::RunResult(output));
+        let _ = log_tx.send(AppEvent::RunEnd(workflow_name));
+    }
 }

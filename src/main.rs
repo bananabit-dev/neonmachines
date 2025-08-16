@@ -6,6 +6,7 @@ mod commands;
 mod create_ui;
 mod workflow_ui;
 mod app;
+mod tools;
 
 use color_eyre::Result;
 use crossterm::{event, execute, terminal};

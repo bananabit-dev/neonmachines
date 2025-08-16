@@ -67,6 +67,19 @@ pub fn handle_command(
                 }
             }
         }
+        "/create" => {
+            // handled in app.rs (switches mode)
+            messages.push(ChatMessage {
+                from: "system",
+                text: "Entering create workflow mode".into(),
+            });
+        }
+        "/workflow" => {
+            messages.push(ChatMessage {
+                from: "system",
+                text: "Entering workflow selection mode".into(),
+            });
+        }
         _ => {
             messages.push(ChatMessage {
                 from: "system",

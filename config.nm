@@ -1,4 +1,9 @@
-workflow:test55
+workflow:Omega
+model:z-ai/glm-4.5
+temperature:0.7
 agent_1: Agent
 files:"role:system:security_check.poml;role:user:get_files.poml"
+maximum_iterations:3
+agent_2: Agent
+files:"role:system:summary.poml"
 maximum_iterations:3

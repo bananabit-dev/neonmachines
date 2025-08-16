@@ -1,4 +1,4 @@
-use std::fs::{File};
+use std::fs::File;
 use std::io::{Read, Write};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +19,8 @@ pub struct WorkflowConfig {
     pub name: String,
     pub rows: Vec<AgentRow>,
     pub active_agent_index: usize,
+    pub model: String,
+    pub temperature: f32,
 }
 
 impl Default for WorkflowConfig {
@@ -31,6 +33,8 @@ impl Default for WorkflowConfig {
                 max_iterations: 3,
             }],
             active_agent_index: 0,
+            model: "z-ai/glm-4.5".into(),
+            temperature: 0.7,
         }
     }
 }
@@ -40,6 +44,8 @@ pub const CONFIG_FILE: &str = "config.nm";
 pub fn save_nm(cfg: &WorkflowConfig) -> std::io::Result<()> {
     let mut out = String::new();
     out.push_str(&format!("workflow:{}\n", cfg.name));
+    out.push_str(&format!("model:{}\n", cfg.model));
+    out.push_str(&format!("temperature:{}\n", cfg.temperature));
     for (i, row) in cfg.rows.iter().enumerate() {
         out.push_str(&format!("agent_{}: {:?}\n", i + 1, row.agent_type));
         out.push_str(&format!("files:\"{}\"\n", row.files));
@@ -71,6 +77,8 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
     let mut name = "default".to_string();
     let mut rows: Vec<AgentRow> = Vec::new();
     let mut cur_agent: Option<AgentRow> = None;
+    let mut model = "z-ai/glm-4.5".to_string();
+    let mut temperature = 0.7;
 
     let mut push_current =
         |rows: &mut Vec<AgentRow>, cur: &mut Option<AgentRow>| {
@@ -86,6 +94,14 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
         }
         if let Some(rest) = line.strip_prefix("workflow:") {
             name = rest.trim().to_string();
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("model:") {
+            model = rest.trim().to_string();
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("temperature:") {
+            temperature = rest.trim().parse::<f32>().unwrap_or(0.7);
             continue;
         }
         if let Some(rest) = line.strip_prefix("agent_") {
@@ -135,27 +151,11 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
         name,
         rows,
         active_agent_index: 0,
+        model,
+        temperature,
     })
 }
 
 pub fn preset_workflows() -> Vec<WorkflowConfig> {
-    vec![
-        WorkflowConfig::default(),
-        WorkflowConfig {
-            name: "security_checker".into(),
-            rows: vec![
-                AgentRow {
-                    agent_type: AgentType::Agent,
-                    files: "role:system:security_check.poml;role:user:get_files.poml".into(),
-                    max_iterations: 3,
-                },
-                AgentRow {
-                    agent_type: AgentType::ParallelAgent,
-                    files: "role:ai:summary.poml".into(),
-                    max_iterations: 2,
-                },
-            ],
-            active_agent_index: 0,
-        },
-    ]
+    vec![WorkflowConfig::default()]
 }

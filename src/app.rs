@@ -135,7 +135,7 @@ impl App {
                             KeyCode::Tab => {
                                 self.create_focus += 1;
                                 let max_focus =
-                                    self.workflows[&self.active_workflow].rows.len() * 3 + 1;
+                                    self.workflows[&self.active_workflow].rows.len() * 3 + 3;
                                 if self.create_focus > max_focus {
                                     self.create_focus = 0;
                                 }
@@ -143,71 +143,71 @@ impl App {
                             KeyCode::BackTab => {
                                 if self.create_focus == 0 {
                                     self.create_focus =
-                                        self.workflows[&self.active_workflow].rows.len() * 3 + 1;
+                                        self.workflows[&self.active_workflow].rows.len() * 3 + 3;
                                 } else {
                                     self.create_focus -= 1;
                                 }
                             }
-                            KeyCode::Left | KeyCode::Right => {
-                                if self.create_focus > 1 && (self.create_focus - 2) % 3 == 0 {
-                                    let row_idx = (self.create_focus - 2) / 3;
-                                    let cfg =
-                                        self.workflows.get_mut(&self.active_workflow).unwrap();
-                                    let row = &mut cfg.rows[row_idx];
-                                    row.agent_type = match row.agent_type {
-                                        AgentType::Agent => AgentType::ParallelAgent,
-                                        AgentType::ParallelAgent => AgentType::Agent,
-                                    };
-                                }
-                            }
                             KeyCode::Char(c) => {
-                                if self.create_focus == 0
-                                    || self.create_focus == 1
-                                    || (self.create_focus - 2) % 3 != 0
-                                {
-                                    self.insert_char(c);
-                                }
+                                self.insert_char(c);
                             }
                             KeyCode::Backspace => {
-                                if self.create_focus == 0
-                                    || self.create_focus == 1
-                                    || (self.create_focus - 2) % 3 != 0
-                                {
-                                    self.backspace();
-                                }
+                                self.backspace();
                             }
                             KeyCode::Enter => {
                                 if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
-                                    if self.create_focus == 0 {
-                                        if !self.input.trim().is_empty() {
-                                            let new_name = self.input.trim().to_string();
-                                            let mut cfg_clone = cfg.clone();
-                                            cfg_clone.name = new_name.clone();
-                                            self.workflows.remove(&self.active_workflow);
-                                            self.workflows.insert(new_name.clone(), cfg_clone);
-                                            self.active_workflow = new_name;
-                                        }
-                                    } else if self.create_focus == 1 {
-                                        if let Ok(n) = self.input.trim().parse::<usize>() {
-                                            cfg.rows.resize_with(n, || AgentRow {
-                                                agent_type: AgentType::Agent,
-                                                files: String::new(),
-                                                max_iterations: 3,
-                                            });
-                                        }
-                                    } else {
-                                        let row_idx = (self.create_focus - 2) / 3;
-                                        let field = (self.create_focus - 2) % 3;
-                                        match field {
-                                            1 => {
-                                                cfg.rows[row_idx].files = self.input.clone();
+                                    match self.create_focus {
+                                        0 => {
+                                            if !self.input.trim().is_empty() {
+                                                let new_name = self.input.trim().to_string();
+                                                let mut cfg_clone = cfg.clone();
+                                                cfg_clone.name = new_name.clone();
+                                                self.workflows.remove(&self.active_workflow);
+                                                self.workflows.insert(new_name.clone(), cfg_clone);
+                                                self.active_workflow = new_name;
                                             }
-                                            2 => {
-                                                if let Ok(n) = self.input.trim().parse::<usize>() {
-                                                    cfg.rows[row_idx].max_iterations = n;
+                                        }
+                                        1 => {
+                                            if !self.input.trim().is_empty() {
+                                                cfg.model = self.input.trim().to_string();
+                                            }
+                                        }
+                                        2 => {
+                                            if let Ok(t) = self.input.trim().parse::<f32>() {
+                                                cfg.temperature = t;
+                                            }
+                                        }
+                                        3 => {
+                                            if let Ok(n) = self.input.trim().parse::<usize>() {
+                                                cfg.rows.resize_with(n, || AgentRow {
+                                                    agent_type: AgentType::Agent,
+                                                    files: String::new(),
+                                                    max_iterations: 3,
+                                                });
+                                            }
+                                        }
+                                        _ => {
+                                            let row_idx = (self.create_focus - 4) / 3;
+                                            let field = (self.create_focus - 4) % 3;
+                                            match field {
+                                                0 => {
+                                                    // toggle agent type
+                                                    let row = &mut cfg.rows[row_idx];
+                                                    row.agent_type = match row.agent_type {
+                                                        AgentType::Agent => AgentType::ParallelAgent,
+                                                        AgentType::ParallelAgent => AgentType::Agent,
+                                                    };
                                                 }
+                                                1 => {
+                                                    cfg.rows[row_idx].files = self.input.clone();
+                                                }
+                                                2 => {
+                                                    if let Ok(n) = self.input.trim().parse::<usize>() {
+                                                        cfg.rows[row_idx].max_iterations = n;
+                                                    }
+                                                }
+                                                _ => {}
                                             }
-                                            _ => {}
                                         }
                                     }
                                 }
@@ -353,46 +353,62 @@ impl App {
     }
 
     pub fn render(&self, f: &mut Frame) {
-        let layout = Layout::vertical([
-            Constraint::Min(1),    // Messages area
-            Constraint::Length(3), // Input area
-        ]);
-        let chunks = layout.split(f.area());
-        let main_area = chunks[0];
-        let input_area = chunks[1];
+        match self.mode {
+            Mode::Chat => {
+                let layout = Layout::vertical([
+                    Constraint::Min(1),
+                    Constraint::Length(3),
+                ]);
+                let chunks = layout.split(f.area());
+                let main_area = chunks[0];
+                let input_area = chunks[1];
 
-        // Messages with wrapping + scrolling
-        let mut lines: Vec<Line> = Vec::new();
-        for m in &self.messages {
-            let style = match m.from {
-                "you" => Style::default().fg(Color::Cyan).bold(),
-                "system" => Style::default().fg(Color::Gray).italic(),
-                "progress" => Style::default().fg(Color::Yellow),
-                "agent" => Style::default().fg(Color::Green),
-                "error" => Style::default().fg(Color::Red).bold(),
-                _ => Style::default(),
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{}: ", m.from), style),
-                Span::styled(m.text.clone(), style),
-            ]));
+                let mut lines: Vec<Line> = Vec::new();
+                for m in &self.messages {
+                    let style = match m.from {
+                        "you" => Style::default().fg(Color::Cyan).bold(),
+                        "system" => Style::default().fg(Color::Gray).italic(),
+                        "progress" => Style::default().fg(Color::Yellow),
+                        "agent" => Style::default().fg(Color::Green),
+                        "error" => Style::default().fg(Color::Red).bold(),
+                        _ => Style::default(),
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{}: ", m.from), style),
+                        Span::styled(m.text.clone(), style),
+                    ]));
+                }
+                let text = Text::from(lines);
+                let para = Paragraph::new(text)
+                    .block(Block::default().borders(Borders::ALL).title("Messages"))
+                    .wrap(Wrap { trim: false })
+                    .scroll((self.scroll_offset as u16, 0));
+                f.render_widget(para, main_area);
+
+                let input = Paragraph::new(self.input.as_str())
+                    .style(Style::default().fg(Color::Yellow))
+                    .block(Block::bordered().title("Input"));
+                f.render_widget(input, input_area);
+
+                let cx = input_area.x + 1 + self.cursor_g as u16;
+                let cy = input_area.y + 1;
+                f.set_cursor_position(Position::new(cx, cy));
+            }
+            Mode::Create => {
+                use crate::create_ui::render_create;
+                render_create(
+                    f,
+                    self.workflows.get(&self.active_workflow).unwrap(),
+                    self.create_focus,
+                            &self.input,   // <-- pass live input
+                    f.area(),
+                );
+            }
+            Mode::Workflow => {
+                use crate::workflow_ui::render_workflow;
+                render_workflow(f, &self.workflow_list, self.workflow_index, f.area());
+            }
         }
-        let text = Text::from(lines);
-        let para = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Messages"))
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll_offset as u16, 0));
-        f.render_widget(para, main_area);
-
-        // Input
-        let input = Paragraph::new(self.input.as_str())
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::bordered().title("Input"));
-        f.render_widget(input, input_area);
-
-        let cx = input_area.x + 1 + self.cursor_g as u16;
-        let cy = input_area.y + 1;
-        f.set_cursor_position(Position::new(cx, cy));
     }
 
     pub fn add_message(&mut self, from: &'static str, text: String) {
