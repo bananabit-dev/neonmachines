@@ -1,8 +1,7 @@
-use crate::agents::PomlAgent;
+use crate::agents::{PomlAgent, ChainedAgent};
 use crate::tools::builtin_tools;
 use crate::nm_config::WorkflowConfig;
 use llmgraph::Graph;
-use llmgraph::agents::StatefulAgent;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug)]
@@ -43,24 +42,27 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 cfg.temperature,
             );
 
-            // Wrap PomlAgent in StatefulAgent to forward output
-            let mut stateful = StatefulAgent::new(format!("StatefulAgent{}", i + 1));
-            stateful = stateful.with_processor(Box::new(move |input, _state| {
-                // run PomlAgent synchronously? no, we can't here
-                // Instead, just forward input (Graph will call PomlAgent::run)
-                (input.to_string(), Some(-1))
-            }));
+            // Determine next agent id
+            let next_id = if i + 1 < cfg.rows.len() {
+                Some((i + 1) as i32)
+            } else {
+                None
+            };
 
-            // Instead of using processor, we can just add PomlAgent directly
-            // but we want chaining, so we wrap
-            graph.add_node(i as i32, Box::new(poml_agent));
-            if i > 0 {
-                let _ = graph.add_edge((i - 1) as i32, i as i32);
-            }
+            // Wrap PomlAgent in ChainedAgent
+            let chained = ChainedAgent::new(Box::new(poml_agent), next_id, i as i32, log_tx.clone());
+
+            graph.add_node(i as i32, Box::new(chained));
         }
 
         let output = graph.run(0, &prompt).await;
-        let _ = log_tx.send(AppEvent::RunResult(output));
+
+        // Final result
+        let _ = log_tx.send(AppEvent::RunResult(format!("Final output:\n{}", output)));
+
+        // ✅ Add finished progress
+        let _ = log_tx.send(AppEvent::Log("finished".into()));
+
         let _ = log_tx.send(AppEvent::RunEnd(workflow_name));
     }
 }
