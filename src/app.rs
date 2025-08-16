@@ -42,6 +42,9 @@ pub struct App {
     pub create_focus: usize,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
+    
+    // For agent selection in chat mode
+    pub selected_agent: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -49,6 +52,7 @@ pub enum Mode {
     Chat,
     Create,
     Workflow,
+    InteractiveChat,
 }
 
 impl App {
@@ -61,7 +65,7 @@ impl App {
         Self {
             messages: vec![ChatMessage {
                 from: "system",
-                text: "Welcome! Type a message to chat with the active workflow, or use /create, /run, /agent, /workflow, /save".into(),
+                text: "Welcome! Type a message to chat with the active workflow, or use /create, /run, /agent, /workflow, /save, /chat".into(),
             }],
             input: String::new(),
             cursor_g: 0,
@@ -79,6 +83,7 @@ impl App {
             create_focus: 0,
             scroll_offset: 0,
             auto_scroll: true,
+            selected_agent: None,
         }
     }
 
@@ -106,7 +111,7 @@ impl App {
                 }
                 if k.kind == KeyEventKind::Press {
                     match self.mode {
-                        Mode::Chat => match k.code {
+                        Mode::Chat | Mode::InteractiveChat => match k.code {
                             KeyCode::Enter => self.submit(),
                             KeyCode::Char(c) => {
                                 if !k.modifiers.contains(KeyModifiers::CONTROL) {
@@ -127,6 +132,12 @@ impl App {
                                     self.scroll_offset += 1;
                                 } else {
                                     self.auto_scroll = true;
+                                }
+                            }
+                            KeyCode::Esc => {
+                                if self.mode == Mode::InteractiveChat {
+                                    self.mode = Mode::Chat;
+                                    self.add_message("system", "Exited interactive chat mode".to_string());
                                 }
                             }
                             _ => {}
@@ -347,6 +358,7 @@ impl App {
                 &mut self.active_workflow,
                 &self.tx,
                 &mut self.messages,
+                &mut self.selected_agent, // Pass a mutable reference to selected_agent
             );
             if line.starts_with("/create") {
                 self.mode = Mode::Create;
@@ -356,14 +368,25 @@ impl App {
                 self.workflow_list = self.workflows.values().cloned().collect();
                 self.workflow_index = 0;
             }
+            if line.starts_with("/chat") {
+                self.mode = Mode::InteractiveChat;
+                self.add_message("system", "Entered interactive chat mode. Press ESC to exit.".to_string());
+            }
         } else {
             if let Some(cfg) = self.workflows.get(&self.active_workflow) {
-                let user_prompt = format!("User: {}", line);
+                let user_prompt = if self.mode == Mode::InteractiveChat {
+                    line.clone() // In interactive mode, send the line directly
+                } else {
+                    format!("User: {}", line) // In normal mode, prefix with "User:"
+                };
                 let _ = self.tx.send(AppCommand::RunWorkflow {
                     workflow_name: cfg.name.clone(),
                     prompt: user_prompt,
                     cfg: cfg.clone(),
+                    start_agent: self.selected_agent, // Use selected agent or None for default
                 });
+            } else {
+                self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
             }
         }
         self.input.clear();
@@ -425,6 +448,46 @@ impl App {
             Mode::Workflow => {
                 use crate::workflow_ui::render_workflow;
                 render_workflow(f, &self.workflow_list, self.workflow_index, f.area());
+            }
+            Mode::InteractiveChat => {
+                let layout = Layout::vertical([
+                    Constraint::Min(1),
+                    Constraint::Length(3),
+                ]);
+                let chunks = layout.split(f.area());
+                let main_area = chunks[0];
+                let input_area = chunks[1];
+
+                let mut lines: Vec<Line> = Vec::new();
+                for m in &self.messages {
+                    let style = match m.from {
+                        "you" => Style::default().fg(Color::Cyan).bold(),
+                        "system" => Style::default().fg(Color::Gray).italic(),
+                        "progress" => Style::default().fg(Color::Yellow),
+                        "agent" => Style::default().fg(Color::Green),
+                        "error" => Style::default().fg(Color::Red).bold(),
+                        _ => Style::default(),
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{}: ", m.from), style),
+                        Span::styled(m.text.clone(), style),
+                    ]));
+                }
+                let text = Text::from(lines);
+                let para = Paragraph::new(text)
+                    .block(Block::default().borders(Borders::ALL).title("Interactive Chat (ESC to exit)"))
+                    .wrap(Wrap { trim: false })
+                    .scroll((self.scroll_offset as u16, 0));
+                f.render_widget(para, main_area);
+
+                let input = Paragraph::new(self.input.as_str())
+                    .style(Style::default().fg(Color::Yellow))
+                    .block(Block::bordered().title("Chat Input"));
+                f.render_widget(input, input_area);
+
+                let cx = input_area.x + 1 + self.cursor_g as u16;
+                let cy = input_area.y + 1;
+                f.set_cursor_position(Position::new(cx, cy));
             }
         }
     }

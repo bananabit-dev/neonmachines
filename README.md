@@ -17,6 +17,93 @@ It also makes use of **tools** (built-in, custom, and MCP servers).
 - MCP server integration via `.nmmcpextension`
 - Configurable validator agents with success/failure routing
 - Traversal limits to prevent infinite loops
+- Interactive chat mode with template variable support
+
+---
+
+## Workflow Routing System
+
+The workflow system supports dynamic routing between agents based on validation results:
+
+### Routing Configuration
+
+In your `config.nm` file, you can configure routing for each agent using:
+
+- `on_success`: The node to route to when an agent/validation succeeds
+- `on_failure`: The node to route to when a validation fails
+
+### Special Route Values
+
+- **`-1`**: End the workflow (no more nodes to execute)
+- **`0` to `N`**: Route to a specific node (0-based indexing)
+  - `0` = agent_1
+  - `1` = agent_2
+  - etc.
+
+### Example Configuration
+
+```
+agent_1: Agent
+on_success:1      # Go to agent_2 on success
+on_failure:0      # Retry agent_1 on failure
+
+agent_2: ValidatorAgent
+on_success:-1     # End workflow on validation success
+on_failure:0      # Go back to agent_1 on validation failure
+```
+
+### ValidatorAgent Behavior
+
+The ValidatorAgent uses **JSON structure validation** (similar to Pydantic) to determine success/failure:
+
+#### Validation Logic:
+
+1. **Explicit Validation Result**: If response contains a `valid` field:
+```json
+{
+  "valid": true,
+  "errors": [],
+  "data": { ... }
+}
+```
+The `valid` field value determines the validation result.
+
+2. **Any Valid JSON Structure**: Without explicit `valid` field:
+```json
+{
+  "name": "example",
+  "items": ["a", "b", "c"],
+  "count": 42
+}
+```
+Any well-formed JSON is considered **valid** by default.
+
+3. **Invalid or Missing JSON**:
+```
+This is plain text without JSON
+```
+Responses without valid JSON structure are considered **invalid**.
+
+#### How It Works:
+- Attempts to parse the entire response as JSON
+- If that fails, extracts embedded JSON objects `{...}` or arrays `[...]`
+- Validates the extracted JSON structure
+- Routes based on validation success or failure
+
+#### Benefits:
+- **Generic**: Works with any JSON structure defined by user POML files
+- **Type-Safe**: Uses serde for strict JSON validation
+- **Flexible**: Supports both explicit validation results and implicit structure validation
+- **User-Defined**: POML files determine what structure to validate against
+
+This approach provides validation similar to Pydantic in Python, but remains completely generic - the validator simply checks if valid JSON can be extracted from the response, without requiring specific schemas.
+
+### Logging
+
+All routing decisions are logged with `log_tx`:
+- `"Agent X routing to node Y"` - Shows routing decisions
+- `"Traversal X: Transitioning from node Y to node Z"` - Shows actual transitions
+- `"Workflow completed (reached END node)"` - When `-1` route is taken
 
 ---
 
@@ -110,6 +197,51 @@ serde_json = "1.0"
   │   └── weather.nmmcpextension
   └── .nmignore
 ```
+
+## Interactive Chat Mode
+
+You can chat interactively with your selected workflow using the `/chat` command:
+
+1. Select a workflow with `/workflow`
+2. Enter chat mode with `/chat`
+3. Type messages directly - they will be sent to the active workflow
+4. Press ESC to exit chat mode
+
+In chat mode, your messages are sent directly to the workflow without the "User:" prefix, enabling more natural conversation flow.
+
+## Agent Selection
+
+You can route your chat messages to specific agents within a workflow:
+
+- `/agent list` - Show available agents in the current workflow
+- `/agent <number>` - Select a specific agent by index (0-indexed)
+- `/agent none` - Clear agent selection and use default workflow routing
+
+Example:
+```
+/agent 0        # Route messages to the first agent
+/agent 1        # Route messages to the second agent
+/agent none     # Use default workflow routing
+```
+
+## Template Variables in POML Files
+
+POML files now support template variables for dynamic content:
+
+### Available Variables:
+- `{{prompt}}` or `{{input}}` - The current input from the workflow
+
+### Example POML with Variables:
+```xml
+<poml>
+<user>
+Please generate code for: {{prompt}}
+The user specifically requested: {{input}}
+</user>
+</poml>
+```
+
+When the workflow runs, these variables will be replaced with actual values from your Rust program, enabling two-way communication between your application and the LLM.
 
 ---
 

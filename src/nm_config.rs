@@ -80,10 +80,41 @@ pub fn load_nm_or_create() -> WorkflowConfig {
 fn load_nm() -> std::io::Result<WorkflowConfig> {
     let mut s = String::new();
     File::open(CONFIG_FILE)?.read_to_string(&mut s)?;
-    parse_nm(&s)
+    // For backward compatibility, treat single workflow as before
+    let workflows = parse_nm_multiple(&s)?;
+    workflows.into_iter().next().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "No workflows found")
+    })
+}
+
+/// Parse multiple workflows separated by ====
+pub fn parse_nm_multiple(s: &str) -> std::io::Result<Vec<WorkflowConfig>> {
+    let mut workflows = Vec::new();
+    
+    // Split by ==== separator
+    let sections: Vec<&str> = s.split("====").collect();
+    
+    for section in sections {
+        if section.trim().is_empty() {
+            continue;
+        }
+        let workflow = parse_nm_single(section)?;
+        workflows.push(workflow);
+    }
+    
+    if workflows.is_empty() {
+        // If no separator found, try parsing as single workflow
+        workflows.push(parse_nm_single(s)?);
+    }
+    
+    Ok(workflows)
 }
 
 fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
+    parse_nm_single(s)
+}
+
+fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
     let mut name = "default".to_string();
     let mut rows: Vec<AgentRow> = Vec::new();
     let mut cur_agent: Option<AgentRow> = None;

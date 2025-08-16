@@ -10,6 +10,7 @@ pub fn handle_command(
     active_workflow: &mut String,
     tx: &UnboundedSender<AppCommand>,
     messages: &mut Vec<ChatMessage>,
+    selected_agent: &mut Option<usize>, // Pass selected_agent directly
 ) {
     let mut it = line.split_whitespace();
     let cmd = it.next().unwrap_or("");
@@ -22,6 +23,7 @@ pub fn handle_command(
                             workflow_name: wf.name.clone(),
                             prompt: "Run all".into(),
                             cfg: wf,
+                            start_agent: *selected_agent,
                         });
                     }
                     messages.push(ChatMessage {
@@ -33,6 +35,7 @@ pub fn handle_command(
                         workflow_name: cfg.name.clone(),
                         prompt: "Run".into(),
                         cfg,
+                        start_agent: *selected_agent,
                     });
                     *active_workflow = name.to_string();
                     messages.push(ChatMessage {
@@ -79,6 +82,81 @@ pub fn handle_command(
                 from: "system",
                 text: "Entering workflow selection mode".into(),
             });
+        }
+        "/chat" => {
+            messages.push(ChatMessage {
+                from: "system",
+                text: "Entering interactive chat mode with current workflow. Type your message directly.".into(),
+            });
+        }
+        "/agent" => {
+            let mut parts = it;
+            if let Some(agent_num) = parts.next() {
+                if agent_num == "list" {
+                    if let Some(cfg) = workflows.get(active_workflow) {
+                        let agent_list: Vec<String> = cfg.rows.iter().enumerate().map(|(i, row)| {
+                            format!("{}. {:?} - {}", i, row.agent_type, row.files)
+                        }).collect();
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: format!("Available agents in workflow '{}':\n{}", active_workflow, agent_list.join("\n")),
+                        });
+                    } else {
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: "No active workflow selected.".into(),
+                        });
+                    }
+                } else if agent_num == "none" {
+                    *selected_agent = None;
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "Cleared agent selection. Will use default workflow routing.".into(),
+                    });
+                } else if let Ok(agent_idx) = agent_num.parse::<usize>() {
+                    if let Some(cfg) = workflows.get(active_workflow) {
+                        if agent_idx < cfg.rows.len() {
+                            *selected_agent = Some(agent_idx);
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: format!("Selected agent {} for chat. Messages will be routed to this agent.", agent_idx),
+                            });
+                        } else {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: format!("Agent {} not found. Workflow has {} agents (0-indexed).", agent_idx, cfg.rows.len()),
+                            });
+                        }
+                    } else {
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: "No active workflow selected.".into(),
+                        });
+                    }
+                } else {
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "Invalid agent number. Use /agent <number> or /agent none.".into(),
+                    });
+                }
+            } else {
+                if let Some(cfg) = workflows.get(active_workflow) {
+                    let current = if let Some(idx) = *selected_agent {
+                        format!("Currently selected: Agent {}", idx)
+                    } else {
+                        "Currently selected: Default routing".to_string()
+                    };
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: format!("Usage: /agent <number|none|list>\n{}", current),
+                    });
+                } else {
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "Usage: /agent <number|none|list>".into(),
+                    });
+                }
+            }
         }
         _ => {
             messages.push(ChatMessage {

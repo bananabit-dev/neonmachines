@@ -1,0 +1,12 @@
+<poml>
+<task>validate the input:
+{
+    "vulnerability_1": {
+        "what": "File upload function",
+        "instructions": ["You need to fix the line ..."],
+        "where": ["relativepathto/file.rs"],
+        "severity": 10,
+        "needtofix": 79
+    }
+}</task>
+</poml>

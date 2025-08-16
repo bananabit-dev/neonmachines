@@ -1,0 +1,12 @@
+<poml>
+<user>
+Please generate Rust code for the following requirements:
+{{prompt}}
+
+Make sure the code:
+- Compiles without errors
+- Includes proper error handling
+- Has documentation
+- Follows Rust conventions
+</user>
+</poml>
