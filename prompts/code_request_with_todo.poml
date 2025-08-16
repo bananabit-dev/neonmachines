@@ -1,10 +1,10 @@
 <poml>
-<user>
+<task speaker="system">
 Please generate Rust code for the following requirements:
 {{prompt}}
 
 Current todo list status:
-{{input}}
+is from the previous response.
 
 Make sure the code:
 - Compiles without errors
@@ -13,5 +13,5 @@ Make sure the code:
 - Follows Rust conventions
 
 Based on the todo list status, focus on the tasks that are in progress or need attention.
-</user>
+</task>
 </poml>
