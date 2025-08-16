@@ -62,7 +62,7 @@ pub struct PomlAgent {
     pub files: Vec<String>,
     pub model: String,
     pub temperature: f32,
-    pub max_iterations: usize,   // ✅ configurable
+    pub max_iterations: usize,
 }
 
 impl PomlAgent {
@@ -135,7 +135,7 @@ impl Agent for PomlAgent {
         loop {
             iteration += 1;
             if iteration > self.max_iterations {
-                return ("Max iterations reached".into(), None);
+                return ("Error: Max iterations reached".into(), None);
             }
 
             let resp = generate_full_response(
@@ -181,7 +181,9 @@ impl Agent for PomlAgent {
                         return (content.clone(), None);
                     }
                 }
-                Err(e) => return (format!("Error: {}", e), None),
+                Err(e) => {
+                    return (format!("Error: {}", e), None);
+                }
             }
         }
     }
@@ -268,7 +270,7 @@ fn extract_json(text: &str, start_char: char, end_char: char) -> Option<String> 
     }
 }
 
-/// ChainedAgent with history
+/// ChainedAgent with history + logging
 pub struct ChainedAgent {
     inner: Box<dyn Agent>,
     next: Option<i32>,
@@ -324,15 +326,33 @@ impl Agent for ChainedAgent {
             tool_calls: None,
         });
 
-        let _ = self.tx.send(AppEvent::RunResult(format!(
-            "Agent {} output:\n{}",
-            self.id + 1,
-            output
-        )));
+        // ✅ Log separately
+        if output.starts_with("Error:") {
+            let _ = self.tx.send(AppEvent::Log(format!(
+                "Agent {} encountered an error: {}",
+                self.id + 1,
+                output
+            )));
+        } else {
+            let _ = self.tx.send(AppEvent::Log(format!(
+                "Agent {} produced output ({} chars)",
+                self.id + 1,
+                output.len()
+            )));
+            let _ = self.tx.send(AppEvent::RunResult(format!(
+                "Agent {} output:\n{}",
+                self.id + 1,
+                output
+            )));
+        }
 
         let next_node = route_decision.or(self.next);
         let output_with_routing = if let Some(next) = next_node {
-            format!("{}\n__ROUTE__:{}", output, next)
+            if output.starts_with("Error:") {
+                output // don’t append __ROUTE__ on errors
+            } else {
+                format!("{}\n__ROUTE__:{}", output, next)
+            }
         } else {
             output
         };

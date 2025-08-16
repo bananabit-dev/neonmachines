@@ -61,24 +61,14 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 )));
 
                 let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
-                    AgentType::Agent => {
+                    AgentType::Agent | AgentType::ParallelAgent => {
                         let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
                         Box::new(PomlAgent::new(
                             &format!("Agent{}", i + 1),
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
-                            row.max_iterations, // ✅ pass config
-                        ))
-                    }
-                    AgentType::ParallelAgent => {
-                        let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        Box::new(PomlAgent::new(
-                            &format!("ParallelAgent{}", i + 1),
-                            files,
-                            cfg.model.clone(),
-                            cfg.temperature,
-                            row.max_iterations, // ✅ pass config
+                            row.max_iterations,
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -88,7 +78,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
-                            row.max_iterations, // ✅ pass config
+                            row.max_iterations,
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
                         let failure_route = row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
@@ -129,10 +119,8 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                     traversals, current_node + 1, current_input.len()
                 )));
 
-                // Run the current node
                 let mut step_output = graph.run(current_node, &current_input).await;
 
-                // Extract routing decision
                 let next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__:") {
                     let route_str = &step_output[route_idx + 11..];
                     let route = route_str.trim().parse::<i32>().ok();
@@ -193,7 +181,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
-                            row.max_iterations, // ✅ pass config
+                            row.max_iterations,
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -203,7 +191,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
-                            row.max_iterations, // ✅ pass config
+                            row.max_iterations,
                         );
                         Box::new(PomlValidatorAgent::new(poml_validator, row.on_success.unwrap_or(-1), row.on_failure.unwrap_or(-1)))
                     }
