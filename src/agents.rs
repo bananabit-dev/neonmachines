@@ -62,15 +62,23 @@ pub struct PomlAgent {
     pub files: Vec<String>,
     pub model: String,
     pub temperature: f32,
+    pub max_iterations: usize,   // ✅ configurable
 }
 
 impl PomlAgent {
-    pub fn new(name: &str, files: Vec<String>, model: String, temperature: f32) -> Self {
+    pub fn new(
+        name: &str,
+        files: Vec<String>,
+        model: String,
+        temperature: f32,
+        max_iterations: usize,
+    ) -> Self {
         Self {
             name: name.to_string(),
             files,
             model,
             temperature,
+            max_iterations,
         }
     }
 
@@ -122,12 +130,11 @@ impl Agent for PomlAgent {
         }
 
         let tools = tool_registry.get_tools();
-        let max_iterations = 5;
         let mut iteration = 0;
 
         loop {
             iteration += 1;
-            if iteration > max_iterations {
+            if iteration > self.max_iterations {
                 return ("Max iterations reached".into(), None);
             }
 

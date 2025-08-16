@@ -10,11 +10,11 @@ pub enum AppCommand {
         workflow_name: String,
         prompt: String,
         cfg: WorkflowConfig,
-        start_agent: Option<usize>, // Optional starting agent index
+        start_agent: Option<usize>,
     },
     ShowHistory {
         workflow_name: String,
-        agent_index: Option<usize>, // None = all agents
+        agent_index: Option<usize>,
         cfg: WorkflowConfig,
     },
 }
@@ -53,10 +53,11 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 };
 
                 let _ = log_tx.send(AppEvent::Log(format!(
-                    "Creating agent {} ({:?}): files={}",
+                    "Creating agent {} ({:?}): files={}, max_iterations={}",
                     i + 1,
                     row.agent_type,
-                    row.files
+                    row.files,
+                    row.max_iterations
                 )));
 
                 let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
@@ -67,6 +68,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
+                            row.max_iterations, // ✅ pass config
                         ))
                     }
                     AgentType::ParallelAgent => {
@@ -76,6 +78,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
+                            row.max_iterations, // ✅ pass config
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -85,6 +88,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             files,
                             cfg.model.clone(),
                             cfg.temperature,
+                            row.max_iterations, // ✅ pass config
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
                         let failure_route = row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
@@ -184,11 +188,23 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
                     AgentType::Agent | AgentType::ParallelAgent => {
                         let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        Box::new(PomlAgent::new(&format!("Agent{}", i + 1), files, cfg.model.clone(), cfg.temperature))
+                        Box::new(PomlAgent::new(
+                            &format!("Agent{}", i + 1),
+                            files,
+                            cfg.model.clone(),
+                            cfg.temperature,
+                            row.max_iterations, // ✅ pass config
+                        ))
                     }
                     AgentType::ValidatorAgent => {
                         let files: Vec<String> = row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        let poml_validator = PomlAgent::new(&format!("ValidatorAgent{}", i + 1), files, cfg.model.clone(), cfg.temperature);
+                        let poml_validator = PomlAgent::new(
+                            &format!("ValidatorAgent{}", i + 1),
+                            files,
+                            cfg.model.clone(),
+                            cfg.temperature,
+                            row.max_iterations, // ✅ pass config
+                        );
                         Box::new(PomlValidatorAgent::new(poml_validator, row.on_success.unwrap_or(-1), row.on_failure.unwrap_or(-1)))
                     }
                 };
