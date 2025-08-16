@@ -135,11 +135,24 @@ impl Agent for PomlAgent {
         let tools = tool_registry.get_tools();
         let mut iteration = 0;
 
+        let _ = self.tx.send(AppEvent::Log(format!(
+            "[{}] Starting run with input: {}",
+            self.name, input
+        )));
+
         loop {
             iteration += 1;
             if iteration > self.max_iterations {
                 return ("Error: Max iterations reached".into(), None);
             }
+
+            let _ = self.tx.send(AppEvent::Log(format!(
+                "[{}] Iteration {}/{} sending {} messages to LLM",
+                self.name,
+                iteration,
+                self.max_iterations,
+                messages.len()
+            )));
 
             let resp = generate_full_response(
                 base_url.clone(),
@@ -155,6 +168,10 @@ impl Agent for PomlAgent {
                 Ok(llm) => {
                     let choice = &llm.choices[0];
                     let msg = &choice.message;
+                    let _ = self.tx.send(AppEvent::Log(format!(
+                        "[{}] LLM responded: {:?}",
+                        self.name, msg.content
+                    )));
                     messages.push(Message {
                         role: "assistant".into(),
                         content: msg.content.clone(),
@@ -166,7 +183,7 @@ impl Agent for PomlAgent {
                         for tc in tool_calls {
                             // ✅ Log tool call
                             let _ = self.tx.send(AppEvent::Log(format!(
-                                "Agent {} calling tool '{}' with args: {}",
+                                "[{}] Calling tool '{}' with args: {}",
                                 self.name,
                                 tc.function.name,
                                 tc.function.arguments
@@ -180,7 +197,7 @@ impl Agent for PomlAgent {
                                 Ok(v) => {
                                     let json = serde_json::to_string(&v).unwrap();
                                     let _ = self.tx.send(AppEvent::Log(format!(
-                                        "Agent {} tool '{}' result: {}",
+                                        "[{}] Tool '{}' result: {}",
                                         self.name,
                                         tc.function.name,
                                         json
@@ -190,7 +207,7 @@ impl Agent for PomlAgent {
                                 Err(e) => {
                                     let err = format!("Error: {}", e);
                                     let _ = self.tx.send(AppEvent::Log(format!(
-                                        "Agent {} tool '{}' failed: {}",
+                                        "[{}] Tool '{}' failed: {}",
                                         self.name,
                                         tc.function.name,
                                         e
@@ -201,7 +218,7 @@ impl Agent for PomlAgent {
                             tool_outputs.push(format!("Tool {} result: {}", tc.function.name, content));
                             messages.push(Message {
                                 role: "tool".into(),
-                                content: Some(content),
+                                content: Some(content.clone()),
                                 tool_calls: None,
                             });
                         }
@@ -219,7 +236,12 @@ impl Agent for PomlAgent {
                     }
                 }
                 Err(e) => {
-                    return (format!("Error: {}", e), None);
+                    let err = format!("Error: {}", e);
+                    let _ = self.tx.send(AppEvent::Log(format!(
+                        "[{}] LLM call failed: {}",
+                        self.name, err
+                    )));
+                    return (err, None);
                 }
             }
         }
@@ -307,7 +329,7 @@ fn extract_json(text: &str, start_char: char, end_char: char) -> Option<String> 
     }
 }
 
-/// ChainedAgent with history + logging
+/// ChainedAgent with history + verbose logging
 pub struct ChainedAgent {
     inner: Box<dyn Agent>,
     next: Option<i32>,
@@ -329,6 +351,12 @@ impl Agent for ChainedAgent {
         input: &str,
         tool_registry: &(dyn ToolRegistryTrait + Send + Sync),
     ) -> (String, Option<i32>) {
+        let _ = self.tx.send(AppEvent::Log(format!(
+            "[Agent {}] Starting run with input: {}",
+            self.id + 1,
+            input
+        )));
+
         // Special case: show history
         if input == "__SHOW_HISTORY__" {
             let mut dump = format!("--- History for Agent {} ---\n", self.id + 1);
@@ -363,16 +391,22 @@ impl Agent for ChainedAgent {
             tool_calls: None,
         });
 
+        let _ = self.tx.send(AppEvent::Log(format!(
+            "[Agent {}] Saved to history. History length now {}",
+            self.id + 1,
+            self.history.len()
+        )));
+
         // ✅ Log separately
         if output.starts_with("Error:") {
             let _ = self.tx.send(AppEvent::Log(format!(
-                "Agent {} encountered an error: {}",
+                "[Agent {}] encountered an error: {}",
                 self.id + 1,
                 output
             )));
         } else {
             let _ = self.tx.send(AppEvent::Log(format!(
-                "Agent {} produced output ({} chars)",
+                "[Agent {}] produced output ({} chars)",
                 self.id + 1,
                 output.len()
             )));
@@ -384,6 +418,14 @@ impl Agent for ChainedAgent {
         }
 
         let next_node = route_decision.or(self.next);
+        if let Some(next) = next_node {
+            let _ = self.tx.send(AppEvent::Log(format!(
+                "[Agent {}] Routing to node {}",
+                self.id + 1,
+                if next == -1 { "END".to_string() } else { (next + 1).to_string() }
+            )));
+        }
+
         let output_with_routing = if let Some(next) = next_node {
             if output.starts_with("Error:") {
                 output // don’t append __ROUTE__ on errors
