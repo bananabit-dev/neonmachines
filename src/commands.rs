@@ -10,7 +10,7 @@ pub fn handle_command(
     active_workflow: &mut String,
     tx: &UnboundedSender<AppCommand>,
     messages: &mut Vec<ChatMessage>,
-    selected_agent: &mut Option<usize>, // Pass selected_agent directly
+    selected_agent: &mut Option<usize>,
 ) {
     let mut it = line.split_whitespace();
     let cmd = it.next().unwrap_or("");
@@ -31,7 +31,7 @@ pub fn handle_command(
                         text: "Running all workflows".into(),
                     });
                 } else if let Some(cfg) = workflows.get(name).cloned() {
-                    // ✅ Collect the rest of the line as optional prompt
+                    // Collect the rest of the line as optional prompt
                     let custom_prompt: String = it.collect::<Vec<&str>>().join(" ");
                     let prompt = if custom_prompt.is_empty() {
                         "Run".to_string()
@@ -64,7 +64,6 @@ pub fn handle_command(
             }
         }
         "/save" => {
-            // ✅ Save all workflows instead of just one
             let all: Vec<WorkflowConfig> = workflows.values().cloned().collect();
             if let Err(e) = save_all_nm(&all) {
                 messages.push(ChatMessage {
@@ -79,7 +78,6 @@ pub fn handle_command(
             }
         }
         "/create" => {
-            // handled in app.rs (switches mode)
             messages.push(ChatMessage {
                 from: "system",
                 text: "Entering create workflow mode".into(),
@@ -180,6 +178,43 @@ pub fn handle_command(
                         text: "Usage: /agent <number|none|list>".into(),
                     });
                 }
+            }
+        }
+        "/history" => {
+            if let Some(cfg) = workflows.get(active_workflow).cloned() {
+                if let Some(arg) = it.next() {
+                    if let Ok(agent_idx) = arg.parse::<usize>() {
+                        let _ = tx.send(AppCommand::ShowHistory {
+                            workflow_name: active_workflow.clone(),
+                            agent_index: Some(agent_idx),
+                            cfg,
+                        });
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: format!("Requested history for agent {}", agent_idx),
+                        });
+                    } else {
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: "Usage: /history <agent_index>|all".into(),
+                        });
+                    }
+                } else {
+                    let _ = tx.send(AppCommand::ShowHistory {
+                        workflow_name: active_workflow.clone(),
+                        agent_index: None,
+                        cfg,
+                    });
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "Requested history for all agents".into(),
+                    });
+                }
+            } else {
+                messages.push(ChatMessage {
+                    from: "system",
+                    text: "No active workflow selected.".into(),
+                });
             }
         }
         _ => {
