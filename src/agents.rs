@@ -6,6 +6,7 @@ use llmgraph::models::graph::Agent;
 use llmgraph::models::tools::{Message, ToolRegistryTrait};
 use llmgraph::generate::generate::generate_full_response;
 use crate::runner::AppEvent;
+use crate::shared_history::SharedHistory;
 use tokio::sync::mpsc::UnboundedSender;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -329,18 +330,32 @@ fn extract_json(text: &str, start_char: char, end_char: char) -> Option<String> 
     }
 }
 
-/// ChainedAgent with history + verbose logging
+/// ChainedAgent with history + verbose logging + shared history
 pub struct ChainedAgent {
     inner: Box<dyn Agent>,
     next: Option<i32>,
     id: i32,
     tx: UnboundedSender<AppEvent>,
     history: Vec<Message>,
+    shared_history: SharedHistory,   // ✅ NEW
 }
 
 impl ChainedAgent {
-    pub fn new(inner: Box<dyn Agent>, next: Option<i32>, id: i32, tx: UnboundedSender<AppEvent>) -> Self {
-        Self { inner, next, id, tx, history: Vec::new() }
+    pub fn new(
+        inner: Box<dyn Agent>,
+        next: Option<i32>,
+        id: i32,
+        tx: UnboundedSender<AppEvent>,
+        shared_history: SharedHistory,   // ✅ pass in
+    ) -> Self {
+        Self {
+            inner,
+            next,
+            id,
+            tx,
+            history: Vec::new(),
+            shared_history,
+        }
     }
 }
 
@@ -379,20 +394,27 @@ impl Agent for ChainedAgent {
 
         let (output, route_decision) = self.inner.run(&combined_input, tool_registry).await;
 
-        // Save to history
-        self.history.push(Message {
+        // Save to local + shared history
+        let user_msg = Message {
             role: "user".into(),
             content: Some(input.to_string()),
             tool_calls: None,
-        });
-        self.history.push(Message {
+        };
+        let assistant_msg = Message {
             role: "assistant".into(),
             content: Some(output.clone()),
             tool_calls: None,
-        });
+        };
+
+        self.history.push(user_msg.clone());
+        self.history.push(assistant_msg.clone());
+
+        // ✅ Append to shared history
+        self.shared_history.append(user_msg.clone());
+        self.shared_history.append(assistant_msg.clone());
 
         let _ = self.tx.send(AppEvent::Log(format!(
-            "[Agent {}] Saved to history. History length now {}",
+            "[Agent {}] Saved to history (local + shared). Local history length now {}",
             self.id + 1,
             self.history.len()
         )));
@@ -422,7 +444,11 @@ impl Agent for ChainedAgent {
             let _ = self.tx.send(AppEvent::Log(format!(
                 "[Agent {}] Routing to node {}",
                 self.id + 1,
-                if next == -1 { "END".to_string() } else { (next + 1).to_string() }
+                if next == -1 {
+                    "END".to_string()
+                } else {
+                    (next + 1).to_string()
+                }
             )));
         }
 

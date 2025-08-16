@@ -7,6 +7,7 @@ mod create_ui;
 mod workflow_ui;
 mod app;
 mod tools;
+mod shared_history;
 
 use color_eyre::Result;
 use crossterm::{event, terminal};

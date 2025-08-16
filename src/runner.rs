@@ -1,6 +1,7 @@
 use crate::agents::{PomlAgent, ChainedAgent, PomlValidatorAgent};
-use crate::tools::builtin_tools;
+use crate::tools::builtin_tools_with_history;
 use crate::nm_config::{WorkflowConfig, AgentType};
+use crate::shared_history::SharedHistory;   // ✅ NEW
 use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -37,9 +38,13 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
             let mut graph = Graph::new();
 
+            // ✅ Create shared history
+            let shared_history = SharedHistory::new();
+            let _ = log_tx.send(AppEvent::Log("[SharedHistory] Initialized global shared history".to_string()));
+
             // Register tools
             let _ = log_tx.send(AppEvent::Log("Registering tools...".to_string()));
-            for (tool, func) in builtin_tools() {
+            for (tool, func) in builtin_tools_with_history(shared_history.clone()) {
                 graph.register_tool(tool, func);
             }
 
@@ -69,7 +74,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.model.clone(),
                             cfg.temperature,
                             row.max_iterations,
-                            log_tx.clone(), // ✅ pass tx
+                            log_tx.clone(),
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -80,7 +85,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.model.clone(),
                             cfg.temperature,
                             row.max_iterations,
-                            log_tx.clone(), // ✅ pass tx
+                            log_tx.clone(),
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
                         let failure_route = row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
@@ -96,7 +101,8 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                     }
                 };
 
-                let chained = ChainedAgent::new(agent, next_id, i as i32, log_tx.clone());
+                // ✅ Pass shared_history into ChainedAgent
+                let chained = ChainedAgent::new(agent, next_id, i as i32, log_tx.clone(), shared_history.clone());
                 graph.add_node(i as i32, Box::new(chained));
             }
 
@@ -173,6 +179,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
             let _ = log_tx.send(AppEvent::Log(format!("Showing history for workflow '{}'", workflow_name)));
 
             let mut graph = Graph::new();
+            let shared_history = SharedHistory::new(); // ✅ also create for history inspection
             for (i, row) in cfg.rows.iter().enumerate() {
                 let next_id = if i + 1 < cfg.rows.len() { Some((i + 1) as i32) } else { None };
                 let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
@@ -200,7 +207,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                         Box::new(PomlValidatorAgent::new(poml_validator, row.on_success.unwrap_or(-1), row.on_failure.unwrap_or(-1)))
                     }
                 };
-                let chained = ChainedAgent::new(agent, next_id, i as i32, log_tx.clone());
+                let chained = ChainedAgent::new(agent, next_id, i as i32, log_tx.clone(), shared_history.clone());
                 graph.add_node(i as i32, Box::new(chained));
             }
 
