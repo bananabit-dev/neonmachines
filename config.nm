@@ -1,3 +1,20 @@
+workflow:security_check
+model:z-ai/glm-4.5-air:free
+temperature:0.7
+maximum_traversals:5
+agent_1: Agent
+files:"role:system:security_check.poml;role:user:get_files.poml"
+maximum_iterations:20
+on_success:1
+on_failure:0
+agent_2: ValidatorAgent
+files:"role:system:validate_security_check.poml"
+maximum_iterations:20
+on_success:-1
+on_failure:0
+
+====
+
 workflow:code_generator
 model:z-ai/glm-4.5-air:free
 temperature:0.7
@@ -15,23 +32,6 @@ on_failure:0
 agent_3: ValidatorAgent
 files:"role:system:cargo_validator.poml"
 maximum_iterations:5
-on_success:-1
-on_failure:0
-
-====
-
-workflow:security_check
-model:z-ai/glm-4.5-air:free
-temperature:0.7
-maximum_traversals:5
-agent_1: Agent
-files:"role:system:security_check.poml;role:user:get_files.poml"
-maximum_iterations:20
-on_success:1
-on_failure:0
-agent_2: ValidatorAgent
-files:"role:system:validate_security_check.poml"
-maximum_iterations:20
 on_success:-1
 on_failure:0
 

@@ -31,16 +31,24 @@ pub fn handle_command(
                         text: "Running all workflows".into(),
                     });
                 } else if let Some(cfg) = workflows.get(name).cloned() {
+                    // ✅ Collect the rest of the line as optional prompt
+                    let custom_prompt: String = it.collect::<Vec<&str>>().join(" ");
+                    let prompt = if custom_prompt.is_empty() {
+                        "Run".to_string()
+                    } else {
+                        custom_prompt
+                    };
+
                     let _ = tx.send(AppCommand::RunWorkflow {
                         workflow_name: cfg.name.clone(),
-                        prompt: "Run".into(),
+                        prompt: prompt.clone(),
                         cfg,
                         start_agent: *selected_agent,
                     });
                     *active_workflow = name.to_string();
                     messages.push(ChatMessage {
                         from: "system",
-                        text: format!("Running workflow '{}'", name),
+                        text: format!("Running workflow '{}' with prompt: {}", name, prompt),
                     });
                 } else {
                     messages.push(ChatMessage {
@@ -51,7 +59,7 @@ pub fn handle_command(
             } else {
                 messages.push(ChatMessage {
                     from: "system",
-                    text: "Usage: /run <workflow>|all".into(),
+                    text: "Usage: /run <workflow>|all [optional prompt]".into(),
                 });
             }
         }
