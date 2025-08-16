@@ -8,14 +8,13 @@ mod workflow_ui;
 mod app;
 mod tools;
 
-
 use color_eyre::Result;
-use crossterm::{event, execute, terminal};
+use crossterm::{event, terminal};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 use app::App;
-use nm_config::{load_nm_or_create, preset_workflows};
+use nm_config::{load_all_nm, preset_workflows};
 use runner::{run_workflow, AppCommand, AppEvent};
 use tui::{restore_terminal, setup_terminal};
 
@@ -28,15 +27,20 @@ async fn main() -> Result<()> {
     let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel::<AppCommand>();
     let (tx_evt, rx_evt) = mpsc::unbounded_channel::<AppEvent>();
 
-    let loaded = load_nm_or_create();
-    let presets = preset_workflows();
+    // ✅ Load all workflows instead of just one
+    let loaded_workflows = load_all_nm().unwrap_or_else(|_| preset_workflows());
     let mut workflows = std::collections::HashMap::new();
-    for wf in &presets {
+    for wf in &loaded_workflows {
         workflows.insert(wf.name.clone(), wf.clone());
     }
-    workflows.insert(loaded.name.clone(), loaded.clone());
 
-    let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, loaded.name.clone());
+    // Pick the first workflow as active
+    let active_name = loaded_workflows
+        .get(0)
+        .map(|wf| wf.name.clone())
+        .unwrap_or_else(|| "default".to_string());
+
+    let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name);
 
     tokio::spawn(async move {
         while let Some(cmd) = rx_cmd.recv().await {

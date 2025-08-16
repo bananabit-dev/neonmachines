@@ -1,4 +1,4 @@
-use crate::nm_config::{save_nm, WorkflowConfig};
+use crate::nm_config::{save_all_nm, WorkflowConfig};
 use crate::runner::AppCommand;
 use crate::app::ChatMessage;
 use tokio::sync::mpsc::UnboundedSender;
@@ -56,18 +56,18 @@ pub fn handle_command(
             }
         }
         "/save" => {
-            if let Some(cfg) = workflows.get(active_workflow) {
-                if let Err(e) = save_nm(cfg) {
-                    messages.push(ChatMessage {
-                        from: "system",
-                        text: format!("Save error: {}", e),
-                    });
-                } else {
-                    messages.push(ChatMessage {
-                        from: "system",
-                        text: "Saved config.nm".into(),
-                    });
-                }
+            // ✅ Save all workflows instead of just one
+            let all: Vec<WorkflowConfig> = workflows.values().cloned().collect();
+            if let Err(e) = save_all_nm(&all) {
+                messages.push(ChatMessage {
+                    from: "system",
+                    text: format!("Save error: {}", e),
+                });
+            } else {
+                messages.push(ChatMessage {
+                    from: "system",
+                    text: "Saved all workflows to config.nm".into(),
+                });
             }
         }
         "/create" => {
@@ -94,12 +94,21 @@ pub fn handle_command(
             if let Some(agent_num) = parts.next() {
                 if agent_num == "list" {
                     if let Some(cfg) = workflows.get(active_workflow) {
-                        let agent_list: Vec<String> = cfg.rows.iter().enumerate().map(|(i, row)| {
-                            format!("{}. {:?} - {}", i, row.agent_type, row.files)
-                        }).collect();
+                        let agent_list: Vec<String> = cfg
+                            .rows
+                            .iter()
+                            .enumerate()
+                            .map(|(i, row)| {
+                                format!("{}. {:?} - {}", i, row.agent_type, row.files)
+                            })
+                            .collect();
                         messages.push(ChatMessage {
                             from: "system",
-                            text: format!("Available agents in workflow '{}':\n{}", active_workflow, agent_list.join("\n")),
+                            text: format!(
+                                "Available agents in workflow '{}':\n{}",
+                                active_workflow,
+                                agent_list.join("\n")
+                            ),
                         });
                     } else {
                         messages.push(ChatMessage {
@@ -119,12 +128,19 @@ pub fn handle_command(
                             *selected_agent = Some(agent_idx);
                             messages.push(ChatMessage {
                                 from: "system",
-                                text: format!("Selected agent {} for chat. Messages will be routed to this agent.", agent_idx),
+                                text: format!(
+                                    "Selected agent {} for chat. Messages will be routed to this agent.",
+                                    agent_idx
+                                ),
                             });
                         } else {
                             messages.push(ChatMessage {
                                 from: "system",
-                                text: format!("Agent {} not found. Workflow has {} agents (0-indexed).", agent_idx, cfg.rows.len()),
+                                text: format!(
+                                    "Agent {} not found. Workflow has {} agents (0-indexed).",
+                                    agent_idx,
+                                    cfg.rows.len()
+                                ),
                             });
                         }
                     } else {

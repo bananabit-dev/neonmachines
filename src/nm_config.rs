@@ -48,24 +48,36 @@ impl Default for WorkflowConfig {
 
 pub const CONFIG_FILE: &str = "config.nm";
 
+/// Save a single workflow (legacy compatibility)
 pub fn save_nm(cfg: &WorkflowConfig) -> std::io::Result<()> {
+    save_all_nm(std::slice::from_ref(cfg))
+}
+
+/// Save all workflows in multi-format
+pub fn save_all_nm(cfgs: &[WorkflowConfig]) -> std::io::Result<()> {
     let mut out = String::new();
-    out.push_str(&format!("workflow:{}\n", cfg.name));
-    out.push_str(&format!("model:{}\n", cfg.model));
-    out.push_str(&format!("temperature:{}\n", cfg.temperature));
-    out.push_str(&format!("maximum_traversals:{}\n", cfg.maximum_traversals));
-    for (i, row) in cfg.rows.iter().enumerate() {
-        out.push_str(&format!("agent_{}: {:?}\n", i + 1, row.agent_type));
-        out.push_str(&format!("files:\"{}\"\n", row.files));
-        out.push_str(&format!("maximum_iterations:{}\n", row.max_iterations));
-        out.push_str(&format!("on_success:{}\n", row.on_success.unwrap_or(-1)));
-        out.push_str(&format!("on_failure:{}\n", row.on_failure.unwrap_or(-1)));
+    for (i, cfg) in cfgs.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n====\n\n");
+        }
+        out.push_str(&format!("workflow:{}\n", cfg.name));
+        out.push_str(&format!("model:{}\n", cfg.model));
+        out.push_str(&format!("temperature:{}\n", cfg.temperature));
+        out.push_str(&format!("maximum_traversals:{}\n", cfg.maximum_traversals));
+        for (j, row) in cfg.rows.iter().enumerate() {
+            out.push_str(&format!("agent_{}: {:?}\n", j + 1, row.agent_type));
+            out.push_str(&format!("files:\"{}\"\n", row.files));
+            out.push_str(&format!("maximum_iterations:{}\n", row.max_iterations));
+            out.push_str(&format!("on_success:{}\n", row.on_success.unwrap_or(-1)));
+            out.push_str(&format!("on_failure:{}\n", row.on_failure.unwrap_or(-1)));
+        }
     }
     let mut f = File::create(CONFIG_FILE)?;
     f.write_all(out.as_bytes())?;
     Ok(())
 }
 
+/// Load a single workflow (legacy compatibility)
 pub fn load_nm_or_create() -> WorkflowConfig {
     match load_nm() {
         Ok(cfg) => cfg,
@@ -77,6 +89,26 @@ pub fn load_nm_or_create() -> WorkflowConfig {
     }
 }
 
+/// Load all workflows
+pub fn load_all_nm() -> std::io::Result<Vec<WorkflowConfig>> {
+    match load_all_nm_inner() {
+        Ok(cfgs) => Ok(cfgs),
+        Err(_) => {
+            // If loading fails, return default workflow
+            let def = WorkflowConfig::default();
+            let _ = save_nm(&def);
+            Ok(vec![def])
+        }
+    }
+}
+
+fn load_all_nm_inner() -> std::io::Result<Vec<WorkflowConfig>> {
+    let mut s = String::new();
+    File::open(CONFIG_FILE)?.read_to_string(&mut s)?;
+    parse_nm_multiple(&s)
+}
+
+/// Load a single workflow (legacy compatibility)
 fn load_nm() -> std::io::Result<WorkflowConfig> {
     let mut s = String::new();
     File::open(CONFIG_FILE)?.read_to_string(&mut s)?;
@@ -108,10 +140,6 @@ pub fn parse_nm_multiple(s: &str) -> std::io::Result<Vec<WorkflowConfig>> {
     }
     
     Ok(workflows)
-}
-
-fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
-    parse_nm_single(s)
 }
 
 fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
