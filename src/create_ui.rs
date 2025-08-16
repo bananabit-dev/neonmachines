@@ -9,7 +9,7 @@ pub fn render_create(
     f: &mut Frame,
     cfg: &WorkflowConfig,
     focus: usize,
-    input: &str,   // <-- NEW: live input buffer
+    input: &str,
     area: Rect,
 ) {
     let mut lines = Vec::<Line>::new();
@@ -83,10 +83,28 @@ pub fn render_create(
         num_style,
     )]));
 
+    // ✅ Maximum traversals
+    let trav_style = if focus == 4 {
+        Style::default().fg(Color::Black).bg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let trav_val = if focus == 4 && !input.is_empty() {
+        input.to_string()
+    } else {
+        cfg.maximum_traversals.to_string()
+    };
+    lines.push(Line::from(vec![Span::styled(
+        format!("Maximum Traversals: {}", trav_val),
+        trav_style,
+    )]));
+
     for (i, row) in cfg.rows.iter().enumerate() {
-        let type_focus = focus == (i * 3 + 4);
-        let files_focus = focus == (i * 3 + 5);
-        let max_focus = focus == (i * 3 + 6);
+        let type_focus = focus == (i * 5 + 5);
+        let files_focus = focus == (i * 5 + 6);
+        let max_focus = focus == (i * 5 + 7);
+        let success_focus = focus == (i * 5 + 8);
+        let failure_focus = focus == (i * 5 + 9);
 
         let type_style = if type_focus {
             Style::default().fg(Color::Black).bg(Color::Cyan)
@@ -127,6 +145,26 @@ pub fn render_create(
         lines.push(Line::from(vec![Span::styled(
             format!("  Max Iter {}: {}", i + 1, max_val),
             max_style,
+        )]));
+
+        let success_val = if success_focus && !input.is_empty() {
+            input.to_string()
+        } else {
+            row.on_success.map(|v| v.to_string()).unwrap_or_default()
+        };
+        lines.push(Line::from(vec![Span::styled(
+            format!("  On Success {}: {}", i + 1, success_val),
+            if success_focus { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() },
+        )]));
+
+        let failure_val = if failure_focus && !input.is_empty() {
+            input.to_string()
+        } else {
+            row.on_failure.map(|v| v.to_string()).unwrap_or_default()
+        };
+        lines.push(Line::from(vec![Span::styled(
+            format!("  On Failure {}: {}", i + 1, failure_val),
+            if failure_focus { Style::default().fg(Color::Black).bg(Color::Cyan) } else { Style::default() },
         )]));
     }
 

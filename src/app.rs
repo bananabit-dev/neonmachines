@@ -135,7 +135,7 @@ impl App {
                             KeyCode::Tab => {
                                 self.create_focus += 1;
                                 let max_focus =
-                                    self.workflows[&self.active_workflow].rows.len() * 3 + 3;
+                                    self.workflows[&self.active_workflow].rows.len() * 5 + 5;
                                 if self.create_focus > max_focus {
                                     self.create_focus = 0;
                                 }
@@ -143,7 +143,7 @@ impl App {
                             KeyCode::BackTab => {
                                 if self.create_focus == 0 {
                                     self.create_focus =
-                                        self.workflows[&self.active_workflow].rows.len() * 3 + 3;
+                                        self.workflows[&self.active_workflow].rows.len() * 5 + 5;
                                 } else {
                                     self.create_focus -= 1;
                                 }
@@ -183,19 +183,27 @@ impl App {
                                                     agent_type: AgentType::Agent,
                                                     files: String::new(),
                                                     max_iterations: 3,
+                                                    on_success: None,
+                                                    on_failure: None,
                                                 });
                                             }
                                         }
+                                        4 => {
+                                            if let Ok(n) = self.input.trim().parse::<usize>() {
+                                                cfg.maximum_traversals = n;
+                                            }
+                                        }
                                         _ => {
-                                            let row_idx = (self.create_focus - 4) / 3;
-                                            let field = (self.create_focus - 4) % 3;
+                                            let row_idx = (self.create_focus - 5) / 5;
+                                            let field = (self.create_focus - 5) % 5;
                                             match field {
                                                 0 => {
                                                     // toggle agent type
                                                     let row = &mut cfg.rows[row_idx];
                                                     row.agent_type = match row.agent_type {
                                                         AgentType::Agent => AgentType::ParallelAgent,
-                                                        AgentType::ParallelAgent => AgentType::Agent,
+                                                        AgentType::ParallelAgent => AgentType::ValidatorAgent,
+                                                        AgentType::ValidatorAgent => AgentType::Agent,
                                                     };
                                                 }
                                                 1 => {
@@ -204,6 +212,16 @@ impl App {
                                                 2 => {
                                                     if let Ok(n) = self.input.trim().parse::<usize>() {
                                                         cfg.rows[row_idx].max_iterations = n;
+                                                    }
+                                                }
+                                                3 => {
+                                                    if let Ok(n) = self.input.trim().parse::<i32>() {
+                                                        cfg.rows[row_idx].on_success = Some(n);
+                                                    }
+                                                }
+                                                4 => {
+                                                    if let Ok(n) = self.input.trim().parse::<i32>() {
+                                                        cfg.rows[row_idx].on_failure = Some(n);
                                                     }
                                                 }
                                                 _ => {}
@@ -400,7 +418,7 @@ impl App {
                     f,
                     self.workflows.get(&self.active_workflow).unwrap(),
                     self.create_focus,
-                            &self.input,   // <-- pass live input
+                    &self.input,
                     f.area(),
                 );
             }

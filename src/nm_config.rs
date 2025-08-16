@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 pub enum AgentType {
     Agent,
     ParallelAgent,
+    ValidatorAgent,
 }
 
 #[derive(Debug, Clone)]
@@ -12,6 +13,8 @@ pub struct AgentRow {
     pub agent_type: AgentType,
     pub files: String,          // stores role:file mappings
     pub max_iterations: usize,
+    pub on_success: Option<i32>,   // ✅ configurable routing
+    pub on_failure: Option<i32>,   // ✅ configurable routing
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +24,7 @@ pub struct WorkflowConfig {
     pub active_agent_index: usize,
     pub model: String,
     pub temperature: f32,
+    pub maximum_traversals: usize,
 }
 
 impl Default for WorkflowConfig {
@@ -31,10 +35,13 @@ impl Default for WorkflowConfig {
                 agent_type: AgentType::Agent,
                 files: String::new(),
                 max_iterations: 3,
+                on_success: None,
+                on_failure: None,
             }],
             active_agent_index: 0,
             model: "z-ai/glm-4.5".into(),
             temperature: 0.7,
+            maximum_traversals: 20,
         }
     }
 }
@@ -46,10 +53,13 @@ pub fn save_nm(cfg: &WorkflowConfig) -> std::io::Result<()> {
     out.push_str(&format!("workflow:{}\n", cfg.name));
     out.push_str(&format!("model:{}\n", cfg.model));
     out.push_str(&format!("temperature:{}\n", cfg.temperature));
+    out.push_str(&format!("maximum_traversals:{}\n", cfg.maximum_traversals));
     for (i, row) in cfg.rows.iter().enumerate() {
         out.push_str(&format!("agent_{}: {:?}\n", i + 1, row.agent_type));
         out.push_str(&format!("files:\"{}\"\n", row.files));
         out.push_str(&format!("maximum_iterations:{}\n", row.max_iterations));
+        out.push_str(&format!("on_success:{}\n", row.on_success.unwrap_or(-1)));
+        out.push_str(&format!("on_failure:{}\n", row.on_failure.unwrap_or(-1)));
     }
     let mut f = File::create(CONFIG_FILE)?;
     f.write_all(out.as_bytes())?;
@@ -79,6 +89,7 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
     let mut cur_agent: Option<AgentRow> = None;
     let mut model = "z-ai/glm-4.5".to_string();
     let mut temperature = 0.7;
+    let mut maximum_traversals = 20;
 
     let mut push_current =
         |rows: &mut Vec<AgentRow>, cur: &mut Option<AgentRow>| {
@@ -104,6 +115,10 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
             temperature = rest.trim().parse::<f32>().unwrap_or(0.7);
             continue;
         }
+        if let Some(rest) = line.strip_prefix("maximum_traversals:") {
+            maximum_traversals = rest.trim().parse::<usize>().unwrap_or(20);
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("agent_") {
             push_current(&mut rows, &mut cur_agent);
             let parts: Vec<&str> = rest.splitn(2, ':').collect();
@@ -111,6 +126,8 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
                 let ty = parts[1].trim();
                 let agent_type = if ty.contains("Parallel") {
                     AgentType::ParallelAgent
+                } else if ty.contains("Validator") {
+                    AgentType::ValidatorAgent
                 } else {
                     AgentType::Agent
                 };
@@ -118,6 +135,8 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
                     agent_type,
                     files: String::new(),
                     max_iterations: 3,
+                    on_success: None,
+                    on_failure: None,
                 });
             }
             continue;
@@ -136,6 +155,20 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
             }
             continue;
         }
+        if let Some(rest) = line.strip_prefix("on_success:") {
+            let n = rest.trim().parse::<i32>().unwrap_or(-1);
+            if let Some(a) = &mut cur_agent {
+                a.on_success = if n >= 0 { Some(n) } else { None };
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("on_failure:") {
+            let n = rest.trim().parse::<i32>().unwrap_or(-1);
+            if let Some(a) = &mut cur_agent {
+                a.on_failure = if n >= 0 { Some(n) } else { None };
+            }
+            continue;
+        }
     }
     push_current(&mut rows, &mut cur_agent);
 
@@ -144,6 +177,8 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
             agent_type: AgentType::Agent,
             files: String::new(),
             max_iterations: 3,
+            on_success: None,
+            on_failure: None,
         });
     }
 
@@ -153,6 +188,7 @@ fn parse_nm(s: &str) -> std::io::Result<WorkflowConfig> {
         active_agent_index: 0,
         model,
         temperature,
+        maximum_traversals,
     })
 }
 
