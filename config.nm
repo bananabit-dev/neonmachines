@@ -1,4 +1,4 @@
-workflow:ideaman
+workflow:security_check
 model:z-ai/glm-4.5
 temperature:0.7
 maximum_traversals:5
