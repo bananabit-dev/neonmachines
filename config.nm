@@ -1,0 +1,4 @@
+workflow:test55
+agent_1: Agent
+files:"role:system:security_check.poml;role:user:get_files.poml"
+maximum_iterations:3
