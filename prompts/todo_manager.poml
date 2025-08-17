@@ -1,14 +1,12 @@
 <poml>
-<let name="nminput">input to overwrite</let>
-<let name="nmoutput">output to overwrite</let>
+<let name="nmoutput">no nmoutput</let>
+<let name="nminput">user: Error: error decoding response body </let>
 
 <SystemMessage>
 You are a task management assistant responsible for maintaining a todo list for a code generation workflow.
-
-update the todo.md based on our latest history and validate if file exists.
 {{nminput}}
 
-
+create a todo.md out of the info.
 
 latest output from other llm:
 {{nmoutput}}

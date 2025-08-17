@@ -13,8 +13,9 @@ pub struct AgentRow {
     pub agent_type: AgentType,
     pub files: String,          // stores role:file mappings
     pub max_iterations: usize,
-    pub on_success: Option<i32>,   // ✅ configurable routing
-    pub on_failure: Option<i32>,   // ✅ configurable routing
+    pub on_success: Option<i32>,
+    pub on_failure: Option<i32>,
+    pub iteration_delay_ms: u64,   // ✅ configurable delay
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ impl Default for WorkflowConfig {
                 max_iterations: 3,
                 on_success: None,
                 on_failure: None,
+                iteration_delay_ms: 200, // ✅ default
             }],
             active_agent_index: 0,
             model: "z-ai/glm-4.5".into(),
@@ -68,6 +70,7 @@ pub fn save_all_nm(cfgs: &[WorkflowConfig]) -> std::io::Result<()> {
             out.push_str(&format!("agent_{}: {:?}\n", j + 1, row.agent_type));
             out.push_str(&format!("files:\"{}\"\n", row.files));
             out.push_str(&format!("maximum_iterations:{}\n", row.max_iterations));
+            out.push_str(&format!("iteration_delay_ms:{}\n", row.iteration_delay_ms)); // ✅ save delay
             out.push_str(&format!("on_success:{}\n", row.on_success.unwrap_or(-1)));
             out.push_str(&format!("on_failure:{}\n", row.on_failure.unwrap_or(-1)));
         }
@@ -94,7 +97,6 @@ pub fn load_all_nm() -> std::io::Result<Vec<WorkflowConfig>> {
     match load_all_nm_inner() {
         Ok(cfgs) => Ok(cfgs),
         Err(_) => {
-            // If loading fails, return default workflow
             let def = WorkflowConfig::default();
             let _ = save_nm(&def);
             Ok(vec![def])
@@ -112,7 +114,6 @@ fn load_all_nm_inner() -> std::io::Result<Vec<WorkflowConfig>> {
 fn load_nm() -> std::io::Result<WorkflowConfig> {
     let mut s = String::new();
     File::open(CONFIG_FILE)?.read_to_string(&mut s)?;
-    // For backward compatibility, treat single workflow as before
     let workflows = parse_nm_multiple(&s)?;
     workflows.into_iter().next().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, "No workflows found")
@@ -122,10 +123,8 @@ fn load_nm() -> std::io::Result<WorkflowConfig> {
 /// Parse multiple workflows separated by ====
 pub fn parse_nm_multiple(s: &str) -> std::io::Result<Vec<WorkflowConfig>> {
     let mut workflows = Vec::new();
-    
-    // Split by ==== separator
     let sections: Vec<&str> = s.split("====").collect();
-    
+
     for section in sections {
         if section.trim().is_empty() {
             continue;
@@ -133,12 +132,11 @@ pub fn parse_nm_multiple(s: &str) -> std::io::Result<Vec<WorkflowConfig>> {
         let workflow = parse_nm_single(section)?;
         workflows.push(workflow);
     }
-    
+
     if workflows.is_empty() {
-        // If no separator found, try parsing as single workflow
         workflows.push(parse_nm_single(s)?);
     }
-    
+
     Ok(workflows)
 }
 
@@ -196,6 +194,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
                     max_iterations: 3,
                     on_success: None,
                     on_failure: None,
+                    iteration_delay_ms: 200, // ✅ default
                 });
             }
             continue;
@@ -211,6 +210,13 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
             let n = rest.trim().parse::<usize>().unwrap_or(3);
             if let Some(a) = &mut cur_agent {
                 a.max_iterations = n;
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("iteration_delay_ms:") {
+            let n = rest.trim().parse::<u64>().unwrap_or(200);
+            if let Some(a) = &mut cur_agent {
+                a.iteration_delay_ms = n;
             }
             continue;
         }
@@ -238,6 +244,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
             max_iterations: 3,
             on_success: None,
             on_failure: None,
+            iteration_delay_ms: 200,
         });
     }
 

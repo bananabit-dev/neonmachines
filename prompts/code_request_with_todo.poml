@@ -1,10 +1,15 @@
 <poml>
+
+<let name="nmoutput">no nmoutput</let>
+
+<let name="nminput">user: create a pacman game in rust using tui and emojis in a subdirectory. </let>
+
 <task speaker="system">
-Please generate Rust code for the following requirements:
-{{prompt}}
+Please generate Rust code for the following requirements use tool calling:
+{{nminput}}
 
 Current todo list status:
-is from the previous response.
+is in todo.md when exists
 
 Make sure the code:
 - Compiles without errors

@@ -1,14 +1,16 @@
+
 <poml syntax="markdown">
-<let name="nminput">input to overwrite</let>
-<let name="nmoutput">output to overwrite</let>
-<let name="history">history to overwrite</let>
+<let name="nmoutput">no nmoutput</let>
+<let name="nminput">user: create a pacman game in rust using tui and emojis in a subdirectory. </let>
+
+
+
+
 
 <SystemMessage>
 
-You are an expert Rust developer. Your task is to generate clean, efficient, and idiomatic Rust code based on the user's requirements.
+You are an expert Rust developer. Your task is to generate clean, efficient, and idiomatic Rust code based on the user's requirements. call the tools and make sure every file is in place and if exists read the todo.md.
 {{nminput}}
-
-{{history}}
 
 latest output from llm:
 {{nmoutput}}

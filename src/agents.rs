@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::env;
 use std::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::time::{sleep, Duration};
 use regex::Regex;
 
 /// Validation result structure for explicit validation responses
@@ -145,6 +146,7 @@ pub struct PomlAgent {
     pub model: String,
     pub temperature: f32,
     pub max_iterations: usize,
+    pub iteration_delay_ms: u64,   // ✅ new: delay between iterations
     pub tx: UnboundedSender<AppEvent>,
     pub original_prompt: Option<String>,
     pub shared_history: SharedHistory,
@@ -167,6 +169,7 @@ impl PomlAgent {
             model,
             temperature,
             max_iterations,
+            iteration_delay_ms: 200, // ✅ default 200ms
             tx,
             original_prompt: None,
             shared_history,
@@ -253,60 +256,98 @@ impl Agent for PomlAgent {
                 break;
             }
 
-            let resp = generate_full_response(
-                base_url.clone(),
-                api_key.clone(),
-                self.model.clone(),
-                self.temperature,
-                messages.clone(),   // ✅ full conversation
-                Some(tools.clone()),
-            )
-            .await;
+            // ✅ Retry with exponential backoff
+            let mut retries = 0;
+            let max_retries = 5;
+            let mut resp_ok = None;
 
-            match resp {
-                Ok(llm) => {
-                    let choice = &llm.choices[0];
-                    let msg = &choice.message;
+            while retries <= max_retries {
+                let resp = generate_full_response(
+                    base_url.clone(),
+                    api_key.clone(),
+                    self.model.clone(),
+                    self.temperature,
+                    messages.clone(),
+                    Some(tools.clone()),
+                )
+                .await;
 
-                    if let Some(content) = &msg.content {
-                        final_output = content.clone();
-                        let assistant_msg = Message {
-                            role: "assistant".into(),
-                            content: Some(content.clone()),
-                            tool_calls: None,
-                        };
-                        messages.push(assistant_msg.clone());
-                        self.history.push(assistant_msg.clone());
-                        self.shared_history.append(assistant_msg.clone());
+                match resp {
+                    Ok(llm) => {
+                        resp_ok = Some(llm);
+                        break;
                     }
+                    Err(e) => {
+                        let err_str = e.to_string();
+                        let _ = self.tx.send(AppEvent::Log(format!(
+                            "[{}] LLM call failed (attempt {}): {}",
+                            self.name, retries + 1, err_str
+                        )));
 
-                    if let Some(tool_calls) = &msg.tool_calls {
-                        for tc in tool_calls {
-                            let result = tool_registry
-                                .execute_tool(&tc.function.name, &tc.function.arguments);
-
-                            let content = match result {
-                                Ok(v) => serde_json::to_string(&v).unwrap(),
-                                Err(e) => format!("Error: {}", e),
-                            };
-
-                            let tool_msg = Message {
-                                role: "tool".into(),
-                                content: Some(content.clone()),
-                                tool_calls: None,
-                            };
-                            messages.push(tool_msg.clone());
-                            self.history.push(tool_msg.clone());
-                            self.shared_history.append(tool_msg.clone());
+                        if err_str.contains("429") || err_str.contains("rate") {
+                            let backoff = 2u64.pow(retries as u32) * 500;
+                            let _ = self.tx.send(AppEvent::Log(format!(
+                                "[{}] Rate limited, retrying in {}ms",
+                                self.name, backoff
+                            )));
+                            sleep(Duration::from_millis(backoff)).await;
+                            retries += 1;
+                            continue;
+                        } else {
+                            final_output = format!("Error: {}", err_str);
+                            return (final_output, None);
                         }
-                        continue; // loop again after tool call
                     }
-                }
-                Err(e) => {
-                    final_output = format!("Error: {}", e);
-                    break;
                 }
             }
+
+            if resp_ok.is_none() {
+                final_output = "Error: max retries reached".to_string();
+                break;
+            }
+
+            let llm = resp_ok.unwrap();
+            let choice = &llm.choices[0];
+            let msg = &choice.message;
+
+            if let Some(content) = &msg.content {
+                final_output = content.clone();
+                let assistant_msg = Message {
+                    role: "assistant".into(),
+                    content: Some(content.clone()),
+                    tool_calls: None,
+                };
+                messages.push(assistant_msg.clone());
+                self.history.push(assistant_msg.clone());
+                self.shared_history.append(assistant_msg.clone());
+            }
+
+            if let Some(tool_calls) = &msg.tool_calls {
+                for tc in tool_calls {
+                    let result = tool_registry
+                        .execute_tool(&tc.function.name, &tc.function.arguments);
+
+                    let content = match result {
+                        Ok(v) => serde_json::to_string(&v).unwrap(),
+                        Err(e) => format!("Error: {}", e),
+                    };
+
+                    let tool_msg = Message {
+                        role: "tool".into(),
+                        content: Some(content.clone()),
+                        tool_calls: None,
+                    };
+                    messages.push(tool_msg.clone());
+                    self.history.push(tool_msg.clone());
+                    self.shared_history.append(tool_msg.clone());
+                }
+                // ✅ Delay before next iteration
+                sleep(Duration::from_millis(self.iteration_delay_ms)).await;
+                continue;
+            }
+
+            // ✅ Delay before next iteration
+            sleep(Duration::from_millis(self.iteration_delay_ms)).await;
         }
 
         // ✅ Update nmoutput in poml once with the final output

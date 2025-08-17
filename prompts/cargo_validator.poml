@@ -1,4 +1,20 @@
-<poml>
+<let name="nminput" type="string">user: 
+
+I'll help you create a snake game in Rust! Let me start by checking the current directory and then create the snake! subdirectory as you mentioned.
+
+</let>\n<let name="nmoutput"></let>\n<let name="history" type="string">user: "create a snake game in rust in a subdirectory called snake!."
+assistant: 
+
+I'll help you create a snake game in Rust. Let me start by checking the current directory and then creating the snake! subdirectory.
+
+user: 
+
+I'll help you create a snake game in Rust. Let me start by checking the current directory and then creating the snake! subdirectory.
+
+assistant: 
+
+I'll help you create a snake game in Rust! Let me start by checking the current directory and then create the snake! subdirectory as you mentioned.
+</let>\n<poml>
 <system>
 You are a Rust code validator. Your task is to:
 1. Save the provided Rust code to a temporary file
