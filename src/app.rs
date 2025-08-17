@@ -1,6 +1,6 @@
 use crate::commands::handle_command;
 use crate::create_ui::render_create;
-use crate::nm_config::{AgentRow, AgentType, WorkflowConfig, save_all_nm};
+use crate::nm_config::{WorkflowConfig, save_all_nm};
 use crate::runner::{AppCommand, AppEvent};
 use crate::workflow_ui::render_workflow;
 use ratatui::Frame;
@@ -111,7 +111,14 @@ impl App {
                 if k.kind == KeyEventKind::Press {
                     match self.mode {
                         Mode::Chat | Mode::InteractiveChat => match k.code {
-                            KeyCode::Enter => self.submit(),
+                            KeyCode::Enter => {
+                                if k.modifiers.contains(KeyModifiers::SHIFT) {
+                                    // ✅ Insert newline instead of submitting
+                                    self.insert_char('\n');
+                                } else {
+                                    self.submit();
+                                }
+                            }
                             KeyCode::Char(c) => {
                                 if !k.modifiers.contains(KeyModifiers::CONTROL) {
                                     self.insert_char(c);
@@ -212,10 +219,9 @@ impl App {
                 }
             }
             Event::Paste(s) => {
-                // ✅ Multi-line paste support: insert as-is into input buffer
-                for ch in s.chars() {
-                    self.insert_char(ch);
-                }
+                // ✅ Multi-line paste support: append entire string
+                self.input.push_str(&s);
+                self.cursor_g = self.input.graphemes(true).count();
             }
             _ => {}
         }
@@ -313,10 +319,10 @@ impl App {
 
     pub fn render(&self, f: &mut Frame) {
         match self.mode {
-            Mode::Chat => {
+            Mode::Chat | Mode::InteractiveChat => {
                 let layout = Layout::vertical([
                     Constraint::Min(1),
-                    Constraint::Length(3),
+                    Constraint::Length(5), // ✅ taller input box for multi-line
                 ]);
                 let chunks = layout.split(f.area());
                 let main_area = chunks[0];
@@ -332,7 +338,6 @@ impl App {
                         "error" => Style::default().fg(Color::Red).bold(),
                         _ => Style::default(),
                     };
-                    // ✅ Support multi-line messages
                     for (i, part) in m.text.lines().enumerate() {
                         if i == 0 {
                             lines.push(Line::from(vec![
@@ -354,13 +359,20 @@ impl App {
                     .scroll((self.scroll_offset as u16, 0));
                 f.render_widget(para, main_area);
 
+                // ✅ Multi-line input rendering
                 let input = Paragraph::new(self.input.as_str())
                     .style(Style::default().fg(Color::Yellow))
-                    .block(Block::bordered().title("Input"));
+                    .block(Block::bordered().title("Input (Enter=submit, Shift+Enter=newline)"))
+                    .wrap(Wrap { trim: false });
                 f.render_widget(input, input_area);
 
-                let cx = input_area.x + 1 + self.cursor_g as u16;
-                let cy = input_area.y + 1;
+                // ✅ Cursor positioning across lines
+                let lines: Vec<&str> = self.input.split('\n').collect();
+                let current_line = lines.len().saturating_sub(1);
+                let current_col = lines.last().map(|l| l.graphemes(true).count()).unwrap_or(0);
+
+                let cx = input_area.x + 1 + current_col as u16;
+                let cy = input_area.y + 1 + current_line as u16;
                 f.set_cursor_position(Position::new(cx, cy));
             }
             Mode::Create => {
@@ -376,55 +388,6 @@ impl App {
             Mode::Workflow => {
                 use crate::workflow_ui::render_workflow;
                 render_workflow(f, &self.workflow_list, self.workflow_index, f.area());
-            }
-            Mode::InteractiveChat => {
-                let layout = Layout::vertical([
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ]);
-                let chunks = layout.split(f.area());
-                let main_area = chunks[0];
-                let input_area = chunks[1];
-
-                let mut lines: Vec<Line> = Vec::new();
-                for m in &self.messages {
-                    let style = match m.from {
-                        "you" => Style::default().fg(Color::Cyan).bold(),
-                        "system" => Style::default().fg(Color::Gray).italic(),
-                        "progress" => Style::default().fg(Color::Rgb(223, 241, 28)),
-                        "agent" => Style::default().fg(Color::Green),
-                        "error" => Style::default().fg(Color::Red).bold(),
-                        _ => Style::default(),
-                    };
-                    for (i, part) in m.text.lines().enumerate() {
-                        if i == 0 {
-                            lines.push(Line::from(vec![
-                                Span::styled(format!("{}: ", m.from), style),
-                                Span::styled(part.to_string(), style),
-                            ]));
-                        } else {
-                            lines.push(Line::from(vec![
-                                Span::styled("    ", style),
-                                Span::styled(part.to_string(), style),
-                            ]));
-                        }
-                    }
-                }
-                let text = Text::from(lines);
-                let para = Paragraph::new(text)
-                    .block(Block::default().borders(Borders::ALL).title("Interactive Chat (ESC to exit)"))
-                    .wrap(Wrap { trim: false })
-                    .scroll((self.scroll_offset as u16, 0));
-                f.render_widget(para, main_area);
-
-                let input = Paragraph::new(self.input.as_str())
-                    .style(Style::default().fg(Color::Yellow))
-                    .block(Block::bordered().title("Chat Input"));
-                f.render_widget(input, input_area);
-
-                let cx = input_area.x + 1 + self.cursor_g as u16;
-                let cy = input_area.y + 1;
-                f.set_cursor_position(Position::new(cx, cy));
             }
         }
     }

@@ -146,11 +146,12 @@ pub struct PomlAgent {
     pub model: String,
     pub temperature: f32,
     pub max_iterations: usize,
-    pub iteration_delay_ms: u64,   // ✅ new: delay between iterations
+    pub iteration_delay_ms: u64,
     pub tx: UnboundedSender<AppEvent>,
     pub original_prompt: Option<String>,
+    pub latest_user_input: Option<String>,   // ✅ track latest user input
     pub shared_history: SharedHistory,
-    pub history: Vec<Message>,   // ✅ local message history
+    pub history: Vec<Message>,
 }
 
 impl PomlAgent {
@@ -169,9 +170,10 @@ impl PomlAgent {
             model,
             temperature,
             max_iterations,
-            iteration_delay_ms: 200, // ✅ default 200ms
+            iteration_delay_ms: 200,
             tx,
             original_prompt: None,
+            latest_user_input: None,
             shared_history,
             history: Vec::new(),
         }
@@ -181,8 +183,8 @@ impl PomlAgent {
         let mut system_content = String::new();
         let mut vars = HashMap::new();
 
-        if let Some(orig) = &self.original_prompt {
-            vars.insert("nminput".to_string(), orig.clone());
+        if let Some(user_input) = &self.latest_user_input {
+            vars.insert("nminput".to_string(), user_input.clone());
         }
 
         for entry in &self.files {
@@ -198,7 +200,7 @@ impl PomlAgent {
                 let out = run_poml_file_with_vars(
                     file,
                     &vars,
-                    self.original_prompt.as_deref().unwrap_or(user_input),
+                    self.latest_user_input.as_deref().unwrap_or(user_input),
                     last_output,
                     &self.tx,
                 );
@@ -230,6 +232,9 @@ impl Agent for PomlAgent {
             self.original_prompt = Some(input.to_string());
         }
 
+        // ✅ Track latest user input
+        self.latest_user_input = Some(input.to_string());
+
         // ✅ Rehydrate messages from local history
         let mut messages = vec![self.load_system_message(input, "no nmoutput")];
         for msg in &self.history {
@@ -256,7 +261,6 @@ impl Agent for PomlAgent {
                 break;
             }
 
-            // ✅ Retry with exponential backoff
             let mut retries = 0;
             let max_retries = 5;
             let mut resp_ok = None;
@@ -320,6 +324,25 @@ impl Agent for PomlAgent {
                 messages.push(assistant_msg.clone());
                 self.history.push(assistant_msg.clone());
                 self.shared_history.append(assistant_msg.clone());
+
+                // ✅ Update poml with correct nminput (user) and nmoutput (assistant)
+                for entry in &self.files {
+                    let parts: Vec<&str> = entry.splitn(3, ':').collect();
+                    if parts.len() == 3 {
+                        let file = parts[2].trim();
+                        let mut vars = HashMap::new();
+                        if let Some(user_input) = &self.latest_user_input {
+                            vars.insert("nminput".to_string(), user_input.clone());
+                        }
+                        let _ = inject_let_variables_in_file(
+                            file,
+                            &vars,
+                            self.latest_user_input.as_deref().unwrap_or(""),
+                            &final_output,
+                            &self.tx,
+                        );
+                    }
+                }
             }
 
             if let Some(tool_calls) = &msg.tool_calls {
@@ -341,33 +364,32 @@ impl Agent for PomlAgent {
                     self.history.push(tool_msg.clone());
                     self.shared_history.append(tool_msg.clone());
                 }
-                // ✅ Delay before next iteration
                 sleep(Duration::from_millis(self.iteration_delay_ms)).await;
                 continue;
             }
 
-            // ✅ Delay before next iteration
             sleep(Duration::from_millis(self.iteration_delay_ms)).await;
         }
 
-        // ✅ Update nmoutput in poml once with the final output
-        if !final_output.is_empty() {
-            for entry in &self.files {
-                let parts: Vec<&str> = entry.splitn(3, ':').collect();
-                if parts.len() == 3 {
-                    let file = parts[2].trim();
-                    let mut vars = HashMap::new();
-                    if let Some(orig) = &self.original_prompt {
-                        vars.insert("nminput".to_string(), orig.clone());
-                    }
-                    let _ = inject_let_variables_in_file(
-                        file,
-                        &vars,
-                        self.original_prompt.as_deref().unwrap_or(""),
-                        &final_output,
-                        &self.tx,
-                    );
+        // ✅ Ensure nmoutput is updated at the end too
+        if final_output.is_empty() {
+            final_output = "No output produced".to_string();
+        }
+        for entry in &self.files {
+            let parts: Vec<&str> = entry.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                let file = parts[2].trim();
+                let mut vars = HashMap::new();
+                if let Some(user_input) = &self.latest_user_input {
+                    vars.insert("nminput".to_string(), user_input.clone());
                 }
+                let _ = inject_let_variables_in_file(
+                    file,
+                    &vars,
+                    self.latest_user_input.as_deref().unwrap_or(""),
+                    &final_output,
+                    &self.tx,
+                );
             }
         }
 
