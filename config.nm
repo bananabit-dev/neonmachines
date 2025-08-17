@@ -1,3 +1,22 @@
+workflow:code_generator
+model:openai/gpt-oss-20b
+temperature:0.7
+maximum_traversals:1000
+agent_1: Agent
+files:"role:system:code_generator.poml;role:user:code_request_with_todo.poml"
+maximum_iterations:10
+iteration_delay_ms:500
+on_success:1
+on_failure:0
+agent_2: Agent
+files:"role:system:todo_manager.poml"
+maximum_iterations:5
+iteration_delay_ms:500
+on_success:0
+on_failure:0
+
+====
+
 workflow:security_check
 model:z-ai/glm-4.5-air:free
 temperature:0.7
@@ -26,23 +45,4 @@ files:"role:system:chat_system.poml;role:user:chat_user.poml"
 maximum_iterations:20
 iteration_delay_ms:500
 on_success:-1
-on_failure:0
-
-====
-
-workflow:code_generator
-model:openai/gpt-oss-20b
-temperature:0.7
-maximum_traversals:1000
-agent_1: Agent
-files:"role:system:code_generator.poml;role:user:code_request_with_todo.poml"
-maximum_iterations:10
-iteration_delay_ms:500
-on_success:1
-on_failure:0
-agent_2: Agent
-files:"role:system:todo_manager.poml"
-maximum_iterations:5
-iteration_delay_ms:500
-on_success:0
 on_failure:0

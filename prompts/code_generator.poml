@@ -1,7 +1,7 @@
 
 <poml syntax="markdown">
 <let name="nmoutput">no nmoutput</let>
-<let name="nminput">user: create a pacman game in rust using tui and emojis in a subdirectory. </let>
+<let name="nminput">user: create a snake game in rust using ratatui in a subdirectory called snake use emojis. </let>
 
 
 
