@@ -1,7 +1,7 @@
-use crate::agents::{PomlAgent, ChainedAgent, PomlValidatorAgent};
-use crate::tools::builtin_tools_with_history; // ✅ fixed import
-use crate::nm_config::{WorkflowConfig, AgentType};
+use crate::agents::{ChainedAgent, PomlAgent, PomlValidatorAgent};
+use crate::nm_config::{AgentType, WorkflowConfig};
 use crate::shared_history::SharedHistory;
+use crate::tools::builtin_tools_with_history;
 use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -94,6 +94,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
+                            shared_history.clone(), // ✅ FIX
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -106,10 +107,12 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
+                            shared_history.clone(), // ✅ FIX
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
                         let failure_route =
-                            row.on_failure.unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
+                            row.on_failure
+                                .unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
 
                         let _ = log_tx.send(AppEvent::Log(format!(
                             "ValidatorAgent{}: success_route={}, failure_route={}",
@@ -146,9 +149,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
             }
 
             // Execute workflow
-            let _ = log_tx.send(AppEvent::Log(
-                "Starting workflow execution...".to_string(),
-            ));
+            let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
             let mut traversals = 0;
             let mut output = String::new();
             let mut current_input = prompt.clone();
@@ -166,27 +167,33 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 }
                 traversals += 1;
 
-                let _ = log_tx.send(AppEvent::Log(format!(
-                    "Traversal {}: Running node {} with input length {}",
-                    traversals,
-                    current_node + 1,
-                    current_input.len()
-                )));
-
                 let mut step_output = graph.run(current_node, &current_input).await;
 
-                let next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__:") {
-                    let route_str = &step_output[route_idx + 11..];
+                // Try to detect explicit routing marker
+                let mut next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__=") {
+                    let route_str = &step_output[route_idx + 10..];
                     let route = route_str.trim().parse::<i32>().ok();
-                    step_output.truncate(route_idx);
+                    step_output.truncate(route_idx); // remove marker
                     route
                 } else {
                     None
                 };
 
-                let clean_output = step_output.clone();
+                // ✅ If no explicit marker, fall back to config.nm routing
+                if next_node.is_none() {
+                    let row = &cfg.rows[current_node as usize];
+                    if !step_output.starts_with("Error:") {
+                        next_node = row.on_success;
+                    } else {
+                        next_node = row.on_failure;
+                    }
+                }
+
+                let clean_output = step_output.trim().to_string();
                 output.push_str(&clean_output);
-                //current_input = clean_output;
+
+                // Preserve the original prompt and only pass the LLM output to the next agent
+                current_input = clean_output;
 
                 match next_node {
                     Some(-1) => {
@@ -252,6 +259,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
+                            shared_history.clone(), // ✅ FIX
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -264,6 +272,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
+                            shared_history.clone(), // ✅ FIX
                         );
                         Box::new(PomlValidatorAgent::new(
                             poml_validator,

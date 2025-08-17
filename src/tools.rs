@@ -1,15 +1,15 @@
-use crate::shared_history::SharedHistory;
 use crate::runner::AppEvent;
-use llmgraph::models::tools::{Tool, Function, Parameters, Property, Message};
-use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::fs;
-use std::env;
-use std::path::Path;
+use crate::shared_history::SharedHistory;
 use chrono::Local;
+use llmgraph::models::tools::{Function, Message, Parameters, Property, Tool};
+use regex::Regex;
+use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::UnboundedSender;
-use regex::Regex;
 
 /// Helper to define properties
 fn prop(typ: &str, desc: &str) -> Property {
@@ -81,8 +81,14 @@ impl IssueTracker {
 pub fn builtin_tools_with_history(
     shared_history: SharedHistory,
     tx: UnboundedSender<AppEvent>,
-) -> Vec<(Tool, Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>)> {
-    let mut tools: Vec<(Tool, Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>)> = Vec::new();
+) -> Vec<(
+    Tool,
+    Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>,
+)> {
+    let mut tools: Vec<(
+        Tool,
+        Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>,
+    )> = Vec::new();
 
     let todo_list = TodoList::default();
     let issue_tracker = IssueTracker::default();
@@ -107,15 +113,13 @@ pub fn builtin_tools_with_history(
             },
         };
         let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
-            Box::new(move |_args| {
-                match env::current_dir() {
-                    Ok(p) => {
-                        let cwd = p.to_string_lossy().to_string();
-                        let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][pwd] {}", cwd)));
-                        Ok(json!({ "cwd": cwd }))
-                    }
-                    Err(e) => Err(e.to_string()),
+            Box::new(move |_args| match env::current_dir() {
+                Ok(p) => {
+                    let cwd = p.to_string_lossy().to_string();
+                    let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][pwd] {}", cwd)));
+                    Ok(json!({ "cwd": cwd }))
                 }
+                Err(e) => Err(e.to_string()),
             });
         tools.push((tool, func));
     }
@@ -142,7 +146,10 @@ pub fn builtin_tools_with_history(
                 let path = args["path"].as_str().unwrap_or(".");
                 let entries = fs::read_dir(path)
                     .map_err(|e| e.to_string())?
-                    .map(|e| e.map(|e| e.file_name().to_string_lossy().to_string()).map_err(|e| e.to_string()))
+                    .map(|e| {
+                        e.map(|e| e.file_name().to_string_lossy().to_string())
+                            .map_err(|e| e.to_string())
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 let _ = tx_clone.send(AppEvent::Log(format!(
                     "[TOOL][ls] {} entries in {}",
@@ -192,7 +199,10 @@ pub fn builtin_tools_with_history(
     {
         let tx_clone = tx.clone();
         let mut props = HashMap::new();
-        props.insert("path".into(), prop("string", "File to create or update timestamp"));
+        props.insert(
+            "path".into(),
+            prop("string", "File to create or update timestamp"),
+        );
         let tool = Tool {
             tool_type: "function".into(),
             function: Function {
@@ -260,18 +270,21 @@ pub fn builtin_tools_with_history(
     // File Writing Tools
     // -------------------------
 
-    // write_file
+    // write_file (chunked)
     {
         let tx_clone = tx.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "File path to write"));
         props.insert("content".into(), prop("string", "Content to write"));
-        props.insert("append".into(), prop("boolean", "Append instead of overwrite"));
+        props.insert(
+            "append".into(),
+            prop("boolean", "Append instead of overwrite"),
+        );
         let tool = Tool {
             tool_type: "function".into(),
             function: Function {
                 name: "write_file".into(),
-                description: "Write content to a file (overwrite or append)".into(),
+                description: "Write content to a file (splits into chunks if too large)".to_string(),
                 parameters: Parameters {
                     param_type: "object".into(),
                     properties: props,
@@ -285,28 +298,40 @@ pub fn builtin_tools_with_history(
                 let content = args["content"].as_str().ok_or("Missing content")?;
                 let append = args["append"].as_bool().unwrap_or(false);
 
-                let res = if append {
+                let mut file = if append {
                     std::fs::OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open(path)
-                        .and_then(|mut f| std::io::Write::write_all(&mut f, content.as_bytes()))
+                        .map_err(|e| e.to_string())?
                 } else {
-                    std::fs::write(path, content)
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(path)
+                        .map_err(|e| e.to_string())?
                 };
 
-                match res {
-                    Ok(_) => {
-                        let _ = tx_clone.send(AppEvent::Log(format!(
-                            "[TOOL][write_file] wrote {} bytes to {} (append={})",
-                            content.len(),
-                            path,
-                            append
-                        )));
-                        Ok(json!({ "status": "ok", "path": path }))
-                    }
-                    Err(e) => Err(e.to_string()),
+                use std::io::Write;
+                let mut total_bytes = 0;
+                let mut chunks = 0;
+                for chunk in content.as_bytes().chunks(8192) {
+                    file.write_all(chunk).map_err(|e| e.to_string())?;
+                    total_bytes += chunk.len();
+                    chunks += 1;
                 }
+
+                let _ = tx_clone.send(AppEvent::Log(format!(
+                    "[TOOL][write_file] wrote {} bytes in {} chunks to {} (append={})",
+                    total_bytes, chunks, path, append
+                )));
+                Ok(json!({
+                    "status": "ok",
+                    "path": path,
+                    "bytes_written": total_bytes,
+                    "chunks": chunks
+                }))
             });
         tools.push((tool, func));
     }
@@ -316,7 +341,10 @@ pub fn builtin_tools_with_history(
         let tx_clone = tx.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "File path to write"));
-        props.insert("parts".into(), prop("array", "Array of content parts to write sequentially"));
+        props.insert(
+            "parts".into(),
+            prop("array", "Array of content parts to write sequentially"),
+        );
         let tool = Tool {
             tool_type: "function".into(),
             function: Function {
@@ -404,9 +432,15 @@ pub fn builtin_tools_with_history(
         let tx_clone = tx.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "File path"));
-        props.insert("search".into(), prop("string", "String or regex to search for"));
+        props.insert(
+            "search".into(),
+            prop("string", "String or regex to search for"),
+        );
         props.insert("replace".into(), prop("string", "Replacement string"));
-        props.insert("regex".into(), prop("boolean", "Use regex (default: false)"));
+        props.insert(
+            "regex".into(),
+            prop("boolean", "Use regex (default: false)"),
+        );
         let tool = Tool {
             tool_type: "function".into(),
             function: Function {
@@ -478,10 +512,15 @@ pub fn builtin_tools_with_history(
         }};
     }
 
-    str_tool!("to_upper", "Convert text to uppercase", |s: &str| s.to_uppercase());
-    str_tool!("to_lower", "Convert text to lowercase", |s: &str| s.to_lowercase());
+    str_tool!("to_upper", "Convert text to uppercase", |s: &str| s
+        .to_uppercase());
+    str_tool!("to_lower", "Convert text to lowercase", |s: &str| s
+        .to_lowercase());
     str_tool!("trim", "Trim whitespace", |s: &str| s.trim().to_string());
-    str_tool!("reverse", "Reverse string", |s: &str| s.chars().rev().collect::<String>());
+    str_tool!("reverse", "Reverse string", |s: &str| s
+        .chars()
+        .rev()
+        .collect::<String>());
 
     // yes_no_paragraphs
     {
@@ -505,7 +544,11 @@ pub fn builtin_tools_with_history(
                 let text = args["text"].as_str().unwrap_or("");
                 let mut results = Vec::new();
                 for (i, para) in text.split("\n\n").enumerate() {
-                    let decision = if para.to_lowercase().contains("yes") { "yes" } else { "no" };
+                    let decision = if para.to_lowercase().contains("yes") {
+                        "yes"
+                    } else {
+                        "no"
+                    };
                     let _ = tx_clone.send(AppEvent::Log(format!(
                         "[TOOL][yes_no_paragraphs] para {} -> {}",
                         i + 1,

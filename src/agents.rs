@@ -1,43 +1,143 @@
-use async_trait::async_trait;
-use dotenv::dotenv;
-use std::env;
-use std::process::Command;
-use llmgraph::models::graph::Agent;
-use llmgraph::models::tools::{Message, ToolRegistryTrait};
-use llmgraph::generate::generate::generate_full_response;
 use crate::runner::AppEvent;
 use crate::shared_history::SharedHistory;
-use tokio::sync::mpsc::UnboundedSender;
+use async_trait::async_trait;
+use dotenv::dotenv;
+use llmgraph::generate::generate::generate_full_response;
+use llmgraph::models::graph::Agent;
+use llmgraph::models::tools::{Message, ToolRegistryTrait};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
+use std::env;
+use std::process::Command;
+use tokio::sync::mpsc::UnboundedSender;
+use regex::Regex;
 
 /// Validation result structure for explicit validation responses
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ValidationResult {
     pub valid: bool,
     pub errors: Option<Vec<String>>,
-    pub data: Option<Value>,
+    pub data: Option<serde_json::Value>,
 }
 
-/// Run a `.poml` file using Python with variable substitution
-fn run_poml_file_with_vars(file: &str, vars: &HashMap<String, String>) -> String {
+/// Inject or overwrite `<let>` variables directly in the `.poml` file
+fn inject_let_variables_in_file(
+    file: &str,
+    vars: &HashMap<String, String>,
+    original_input: &str,
+    latest_output: &str,
+    log_tx: &UnboundedSender<AppEvent>,
+) -> std::io::Result<()> {
     let path = format!("./prompts/{}", file);
-    let content = match std::fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(e) => return format!("Failed to read {}: {}", path, e),
-    };
-    let mut processed_content = content;
-    for (key, value) in vars.iter() {
-        let template = format!("{{{{{}}}}}", key);
-        processed_content = processed_content.replace(&template, value);
+
+    let _ = log_tx.send(AppEvent::Log(format!(
+        "[DEBUG] Injecting <let> variables into POML file: {}",
+        path
+    )));
+
+    let content = std::fs::read_to_string(&path)?;
+    let mut processed = content.clone();
+
+    let re = Regex::new(
+        r#"<let\s+name="([^"]+)"[^>]*>(.*?)</let>|<let\s+name="([^"]+)"[^>]*/>"#,
+    )
+    .unwrap();
+
+    // ✅ Only inject nminput and nmoutput
+    let mut replacements: HashMap<String, String> = vars.clone();
+    replacements.insert(
+        "nminput".to_string(),
+        if original_input.trim().is_empty() {
+            "no nminput".to_string()
+        } else {
+            original_input.to_string()
+        },
+    );
+    replacements.insert(
+        "nmoutput".to_string(),
+        if latest_output.trim().is_empty() {
+            "no nmoutput".to_string()
+        } else {
+            latest_output.to_string()
+        },
+    );
+
+    for value in replacements.values_mut() {
+        *value = value.replace('\n', " ").replace('\r', " ");
     }
-    let temp_path = format!("{}.tmp", path);
-    if let Err(e) = std::fs::write(&temp_path, &processed_content) {
-        return format!("Failed to write temp file: {}", e);
+
+    for (key, value) in &replacements {
+        processed = re
+            .replace_all(&processed, |caps: &regex::Captures| {
+                let name = caps
+                    .get(1)
+                    .map(|m| m.as_str())
+                    .or_else(|| caps.get(3).map(|m| m.as_str()))
+                    .unwrap_or("");
+
+                if name == key {
+                    return format!(r#"<let name="{}">{}</let>"#, name, value);
+                }
+                caps[0].to_string()
+            })
+            .to_string();
     }
+
+    // Ensure nminput and nmoutput exist
+    let mut prepend = String::new();
+    if !processed.contains("name=\"nminput\"") {
+        prepend.push_str(&format!(
+            r#"<let name="nminput">{}</let>\n"#,
+            replacements["nminput"]
+        ));
+    }
+    if !processed.contains("name=\"nmoutput\"") {
+        prepend.push_str(&format!(
+            r#"<let name="nmoutput">{}</let>\n"#,
+            replacements["nmoutput"]
+        ));
+    }
+
+    if !prepend.is_empty() {
+        processed = format!("{}{}", prepend, processed);
+    }
+
+    std::fs::write(&path, processed)?;
+
+    let _ = log_tx.send(AppEvent::Log(format!(
+        "[DEBUG] Updated POML file written: {}",
+        path
+    )));
+
+    Ok(())
+}
+
+fn run_poml_file_with_vars(
+    file: &str,
+    vars: &HashMap<String, String>,
+    original_input: &str,
+    latest_output: &str,
+    log_tx: &UnboundedSender<AppEvent>,
+) -> String {
+    let path = format!("./prompts/{}", file);
+
+    let _ = log_tx.send(AppEvent::Log(format!(
+        "[DEBUG] Running POML file: {}",
+        path
+    )));
+
+    if let Err(e) = inject_let_variables_in_file(
+        file,
+        vars,
+        original_input,
+        latest_output,
+        log_tx,
+    ) {
+        return format!("Failed to update {}: {}", file, e);
+    }
+
     let result = match Command::new("python")
-        .args(["-m", "poml", "-f", &temp_path])
+        .args(["-m", "poml", "-f", &path])
         .output()
     {
         Ok(output) => {
@@ -53,7 +153,7 @@ fn run_poml_file_with_vars(file: &str, vars: &HashMap<String, String>) -> String
         }
         Err(e) => format!("Failed to run {}: {}", path, e),
     };
-    let _ = std::fs::remove_file(&temp_path);
+
     result
 }
 
@@ -64,7 +164,10 @@ pub struct PomlAgent {
     pub model: String,
     pub temperature: f32,
     pub max_iterations: usize,
-    pub tx: UnboundedSender<AppEvent>, // ✅ logging channel
+    pub tx: UnboundedSender<AppEvent>,
+    pub original_prompt: Option<String>,
+    pub shared_history: SharedHistory,
+    pub history: Vec<Message>,   // ✅ local message history
 }
 
 impl PomlAgent {
@@ -75,6 +178,7 @@ impl PomlAgent {
         temperature: f32,
         max_iterations: usize,
         tx: UnboundedSender<AppEvent>,
+        shared_history: SharedHistory,
     ) -> Self {
         Self {
             name: name.to_string(),
@@ -83,14 +187,19 @@ impl PomlAgent {
             temperature,
             max_iterations,
             tx,
+            original_prompt: None,
+            shared_history,
+            history: Vec::new(),
         }
     }
 
-    fn load_messages(&self, input: &str) -> Vec<Message> {
-        let mut messages = Vec::new();
+    fn load_system_message(&self, user_input: &str) -> Message {
+        let mut system_content = String::new();
         let mut vars = HashMap::new();
-        vars.insert("prompt".to_string(), input.to_string());
-        vars.insert("input".to_string(), input.to_string());
+
+        if let Some(orig) = &self.original_prompt {
+            vars.insert("nminput".to_string(), orig.clone());
+        }
 
         for entry in &self.files {
             let entry = entry.trim();
@@ -101,15 +210,24 @@ impl PomlAgent {
             if parts.len() == 3 {
                 let role = parts[1].trim();
                 let file = parts[2].trim();
-                let out = run_poml_file_with_vars(file, &vars);
-                messages.push(Message {
-                    role: role.to_string(),
-                    content: Some(out),
-                    tool_calls: None,
-                });
+
+                let out = run_poml_file_with_vars(
+                    file,
+                    &vars,
+                    self.original_prompt.as_deref().unwrap_or(user_input),
+                    "",
+                    &self.tx,
+                );
+
+                system_content.push_str(&format!("=== {} ===\n{}\n\n", role, out));
             }
         }
-        messages
+
+        Message {
+            role: "system".to_string(),
+            content: Some(system_content),
+            tool_calls: None,
+        }
     }
 }
 
@@ -124,43 +242,42 @@ impl Agent for PomlAgent {
         let api_key = env::var("API_KEY").unwrap_or_default();
         let base_url = "https://openrouter.ai/api/v1/chat/completions".to_string();
 
-        let mut messages = self.load_messages(input);
-        if !input.trim().is_empty() {
-            messages.push(Message {
-                role: "user".into(),
-                content: Some(input.to_string()),
-                tool_calls: None,
-            });
+        if self.original_prompt.is_none() {
+            self.original_prompt = Some(input.to_string());
         }
+
+        // ✅ Rehydrate messages from local history
+        let mut messages = vec![self.load_system_message(input)];
+        for msg in &self.history {
+            messages.push(msg.clone());
+        }
+
+        // ✅ Add the new user input once
+        let user_msg = Message {
+            role: "user".into(),
+            content: Some(input.to_string()),
+            tool_calls: None,
+        };
+        messages.push(user_msg.clone());
+        self.history.push(user_msg.clone());
+        self.shared_history.append(user_msg);
 
         let tools = tool_registry.get_tools();
         let mut iteration = 0;
-
-        let _ = self.tx.send(AppEvent::Log(format!(
-            "[{}] Starting run with input: {}",
-            self.name, input
-        )));
+        let mut final_output = String::new();
 
         loop {
             iteration += 1;
             if iteration > self.max_iterations {
-                return ("Error: Max iterations reached".into(), None);
+                return (final_output, None);
             }
-
-            let _ = self.tx.send(AppEvent::Log(format!(
-                "[{}] Iteration {}/{} sending {} messages to LLM",
-                self.name,
-                iteration,
-                self.max_iterations,
-                messages.len()
-            )));
 
             let resp = generate_full_response(
                 base_url.clone(),
                 api_key.clone(),
                 self.model.clone(),
                 self.temperature,
-                messages.clone(),
+                messages.clone(),   // ✅ full conversation
                 Some(tools.clone()),
             )
             .await;
@@ -169,79 +286,43 @@ impl Agent for PomlAgent {
                 Ok(llm) => {
                     let choice = &llm.choices[0];
                     let msg = &choice.message;
-                    let _ = self.tx.send(AppEvent::Log(format!(
-                        "[{}] LLM responded: {:?}",
-                        self.name, msg.content
-                    )));
-                    messages.push(Message {
-                        role: "assistant".into(),
-                        content: msg.content.clone(),
-                        tool_calls: msg.tool_calls.clone(),
-                    });
+
+                    if let Some(content) = &msg.content {
+                        final_output = content.clone();
+                        let assistant_msg = Message {
+                            role: "assistant".into(),
+                            content: Some(content.clone()),
+                            tool_calls: None,
+                        };
+                        messages.push(assistant_msg.clone());
+                        self.history.push(assistant_msg.clone());
+                        self.shared_history.append(assistant_msg.clone());
+                    }
 
                     if let Some(tool_calls) = &msg.tool_calls {
-                        let mut tool_outputs = Vec::new();
                         for tc in tool_calls {
-                            // ✅ Log tool call
-                            let _ = self.tx.send(AppEvent::Log(format!(
-                                "[{}] Calling tool '{}' with args: {}",
-                                self.name,
-                                tc.function.name,
-                                tc.function.arguments
-                            )));
+                            let result = tool_registry
+                                .execute_tool(&tc.function.name, &tc.function.arguments);
 
-                            let result = tool_registry.execute_tool(
-                                &tc.function.name,
-                                &tc.function.arguments,
-                            );
                             let content = match result {
-                                Ok(v) => {
-                                    let json = serde_json::to_string(&v).unwrap();
-                                    let _ = self.tx.send(AppEvent::Log(format!(
-                                        "[{}] Tool '{}' result: {}",
-                                        self.name,
-                                        tc.function.name,
-                                        json
-                                    )));
-                                    json
-                                }
-                                Err(e) => {
-                                    let err = format!("Error: {}", e);
-                                    let _ = self.tx.send(AppEvent::Log(format!(
-                                        "[{}] Tool '{}' failed: {}",
-                                        self.name,
-                                        tc.function.name,
-                                        e
-                                    )));
-                                    err
-                                }
+                                Ok(v) => serde_json::to_string(&v).unwrap(),
+                                Err(e) => format!("Error: {}", e),
                             };
-                            tool_outputs.push(format!("Tool {} result: {}", tc.function.name, content));
-                            messages.push(Message {
+
+                            let tool_msg = Message {
                                 role: "tool".into(),
                                 content: Some(content.clone()),
                                 tool_calls: None,
-                            });
+                            };
+                            messages.push(tool_msg.clone());
+                            self.history.push(tool_msg.clone());
+                            self.shared_history.append(tool_msg.clone());
                         }
-
-                        // If no assistant content, return tool outputs
-                        if msg.content.is_none() {
-                            return (tool_outputs.join("\n"), None);
-                        }
-
-                        continue;
-                    }
-
-                    if let Some(content) = &msg.content {
-                        return (content.clone(), None);
+                        continue; // loop again after tool call
                     }
                 }
                 Err(e) => {
                     let err = format!("Error: {}", e);
-                    let _ = self.tx.send(AppEvent::Log(format!(
-                        "[{}] LLM call failed: {}",
-                        self.name, err
-                    )));
                     return (err, None);
                 }
             }
@@ -290,7 +371,7 @@ impl Agent for PomlValidatorAgent {
                 let mut found = false;
                 for candidate in candidates.drain(..) {
                     if let Some(json_str) = candidate {
-                        if let Ok(value) = serde_json::from_str::<Value>(&json_str) {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
                             if let Some(valid) = value.get("valid").and_then(|v| v.as_bool()) {
                                 found = valid;
                                 break;
@@ -337,7 +418,7 @@ pub struct ChainedAgent {
     id: i32,
     tx: UnboundedSender<AppEvent>,
     history: Vec<Message>,
-    shared_history: SharedHistory,   // ✅ NEW
+    shared_history: SharedHistory, // ✅ NEW
 }
 
 impl ChainedAgent {
@@ -346,7 +427,7 @@ impl ChainedAgent {
         next: Option<i32>,
         id: i32,
         tx: UnboundedSender<AppEvent>,
-        shared_history: SharedHistory,   // ✅ pass in
+        shared_history: SharedHistory, // ✅ pass in
     ) -> Self {
         Self {
             inner,
@@ -383,14 +464,19 @@ impl Agent for ChainedAgent {
             return (dump, None);
         }
 
-        // Build input with history
+        // Build input with full history (including user messages)
         let mut combined_input = String::new();
         for msg in &self.history {
             if let Some(content) = &msg.content {
+                // Include all messages in the history (including user messages)
                 combined_input.push_str(&format!("{}: {}\n", msg.role, content));
             }
         }
-        combined_input.push_str(&format!("user: {}\n", input));
+
+        // Add the current input as a user message
+        if !input.starts_with("__ROUTE__") {
+            combined_input.push_str(&format!("user: {}\n", input));
+        }
 
         let (output, route_decision) = self.inner.run(&combined_input, tool_registry).await;
 
@@ -452,16 +538,7 @@ impl Agent for ChainedAgent {
             )));
         }
 
-        let output_with_routing = if let Some(next) = next_node {
-            if output.starts_with("Error:") {
-                output // don’t append __ROUTE__ on errors
-            } else {
-                format!("{}\n__ROUTE__:{}", output, next)
-            }
-        } else {
-            output
-        };
-        (output_with_routing, next_node)
+        (output, next_node)
     }
 
     fn get_name(&self) -> &str {

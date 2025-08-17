@@ -250,3 +250,127 @@ When the workflow runs, these variables will be replaced with actual values from
 - Add `cat` tool for file reading
 - Add streaming tool outputs
 - Add UI for managing extensions
+
+## Communicating with `<let>` Variables in POML
+
+Neonmachines now fully supports **typed `<let>` variables** in `.poml` files.  
+This allows you to **inject, overwrite, and update variables** dynamically from Rust.
+
+---
+
+### Default Variables
+
+When a workflow runs, Neonmachines automatically injects two variables:
+
+```xml
+<let name="nminput" type="string" value="Original user input" />
+<let name="nmoutput" type="string" value="Latest LLM output" />
+```
+
+- **`nminput`** → the original user input (first message in the workflow)  
+- **`nmoutput`** → the latest LLM output (updated after each agent step)  
+
+These are always present, even if not defined in your `.poml` file.
+
+---
+
+### Example POML with Variables
+
+```xml
+<poml>
+  <let name="nminput" type="string" value="Generate Rust code" />
+  <let name="nmoutput" type="string" value="User asked for a todo manager" />
+  <let name="greeting" type="string" value="Hello, world!" />
+
+  <user>
+    Please generate code for: {{nminput}}
+    The last output was: {{nmoutput}}
+  </user>
+</poml>
+```
+
+---
+
+### Overwriting Variables
+
+You can define your own `<let>` variables in `.poml` files, and Neonmachines will **overwrite them** if you pass values from Rust:
+
+```xml
+<let name="rustoverwrite" type="string" value="not overwritten yet" />
+```
+
+Rust can overwrite this with:
+
+```xml
+<let name="rustoverwrite" type="string" value="Rust has overwritten this" />
+```
+
+This ensures **type safety** and avoids POML parser errors.
+
+---
+
+### Supported `<let>` Forms
+
+Neonmachines supports all POML `<let>` syntaxes:
+
+1. **Simple value**
+```xml
+<let name="greeting" type="string" value="Hello, world!" />
+<p>{{greeting}}</p>
+```
+
+2. **Inline content**
+```xml
+<let name="message" type="string">This is inline text</let>
+<p>{{message}}</p>
+```
+
+3. **Import from file**
+```xml
+<let name="users" src="users.json" />
+<p>First user: {{users[0].name}}</p>
+```
+
+4. **Anonymous import**
+```xml
+<let src="config.json" />
+<p>API Key: {{apiKey}}</p>
+```
+
+5. **Inline JSON**
+```xml
+<let name="person" type="object">
+  { "name": "Alice", "age": 30 }
+</let>
+<p>{{person.name}}</p>
+```
+
+6. **Expression**
+```xml
+<let name="base" type="number" value="10" />
+<let name="increment" type="number" value="5" />
+<let name="total" type="number" value="{{ base + increment }}" />
+<p>Total: {{ total }}</p>
+```
+
+---
+
+### Benefits
+
+- **Two-way communication**:  
+  POML defines variables, Rust can update them dynamically.  
+
+- **Dynamic context injection**:  
+  No more `{{prompt}}` placeholders — everything is managed via `<let>`.  
+
+- **Type safety**:  
+  All injected variables use `type="string"` by default, avoiding parser errors.  
+
+- **Full POML compatibility**:  
+  Works with all `<let>` syntaxes (value, inline, file, JSON, expression).  
+
+---
+
+### Logging
+
+When a workflow starts, logs will show:
