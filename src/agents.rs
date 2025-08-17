@@ -43,24 +43,10 @@ fn inject_let_variables_in_file(
     )
     .unwrap();
 
-    // ✅ Only inject nminput and nmoutput
+    // ✅ Always overwrite nminput and nmoutput
     let mut replacements: HashMap<String, String> = vars.clone();
-    replacements.insert(
-        "nminput".to_string(),
-        if original_input.trim().is_empty() {
-            "no nminput".to_string()
-        } else {
-            original_input.to_string()
-        },
-    );
-    replacements.insert(
-        "nmoutput".to_string(),
-        if latest_output.trim().is_empty() {
-            "no nmoutput".to_string()
-        } else {
-            latest_output.to_string()
-        },
-    );
+    replacements.insert("nminput".to_string(), original_input.to_string());
+    replacements.insert("nmoutput".to_string(), latest_output.to_string());
 
     for value in replacements.values_mut() {
         *value = value.replace('\n', " ").replace('\r', " ");
@@ -84,22 +70,17 @@ fn inject_let_variables_in_file(
     }
 
     // Ensure nminput and nmoutput exist
-    let mut prepend = String::new();
     if !processed.contains("name=\"nminput\"") {
-        prepend.push_str(&format!(
-            r#"<let name="nminput">{}</let>\n"#,
-            replacements["nminput"]
-        ));
+        processed = format!(
+            r#"<let name="nminput">{}</let>\n{}"#,
+            replacements["nminput"], processed
+        );
     }
     if !processed.contains("name=\"nmoutput\"") {
-        prepend.push_str(&format!(
-            r#"<let name="nmoutput">{}</let>\n"#,
-            replacements["nmoutput"]
-        ));
-    }
-
-    if !prepend.is_empty() {
-        processed = format!("{}{}", prepend, processed);
+        processed = format!(
+            r#"<let name="nmoutput">{}</let>\n{}"#,
+            replacements["nmoutput"], processed
+        );
     }
 
     std::fs::write(&path, processed)?;
@@ -297,6 +278,25 @@ impl Agent for PomlAgent {
                         messages.push(assistant_msg.clone());
                         self.history.push(assistant_msg.clone());
                         self.shared_history.append(assistant_msg.clone());
+
+                        // ✅ Update nmoutput in poml with latest content
+                        for entry in &self.files {
+                            let parts: Vec<&str> = entry.splitn(3, ':').collect();
+                            if parts.len() == 3 {
+                                let file = parts[2].trim();
+                                let mut vars = HashMap::new();
+                                if let Some(orig) = &self.original_prompt {
+                                    vars.insert("nminput".to_string(), orig.clone());
+                                }
+                                let _ = inject_let_variables_in_file(
+                                    file,
+                                    &vars,
+                                    self.original_prompt.as_deref().unwrap_or(""),
+                                    content,   // ✅ latest output
+                                    &self.tx,
+                                );
+                            }
+                        }
                     }
 
                     if let Some(tool_calls) = &msg.tool_calls {
