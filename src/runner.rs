@@ -186,7 +186,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
                 let clean_output = step_output.clone();
                 output.push_str(&clean_output);
-                current_input = clean_output;
+                //current_input = clean_output;
 
                 match next_node {
                     Some(-1) => {
