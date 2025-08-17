@@ -174,7 +174,7 @@ impl PomlAgent {
         }
     }
 
-    fn load_system_message(&self, user_input: &str) -> Message {
+    fn load_system_message(&self, user_input: &str, last_output: &str) -> Message {
         let mut system_content = String::new();
         let mut vars = HashMap::new();
 
@@ -196,7 +196,7 @@ impl PomlAgent {
                     file,
                     &vars,
                     self.original_prompt.as_deref().unwrap_or(user_input),
-                    "",
+                    last_output,
                     &self.tx,
                 );
 
@@ -228,7 +228,7 @@ impl Agent for PomlAgent {
         }
 
         // ✅ Rehydrate messages from local history
-        let mut messages = vec![self.load_system_message(input)];
+        let mut messages = vec![self.load_system_message(input, "no nmoutput")];
         for msg in &self.history {
             messages.push(msg.clone());
         }
@@ -250,7 +250,7 @@ impl Agent for PomlAgent {
         loop {
             iteration += 1;
             if iteration > self.max_iterations {
-                return (final_output, None);
+                break;
             }
 
             let resp = generate_full_response(
@@ -278,25 +278,6 @@ impl Agent for PomlAgent {
                         messages.push(assistant_msg.clone());
                         self.history.push(assistant_msg.clone());
                         self.shared_history.append(assistant_msg.clone());
-
-                        // ✅ Update nmoutput in poml with latest content
-                        for entry in &self.files {
-                            let parts: Vec<&str> = entry.splitn(3, ':').collect();
-                            if parts.len() == 3 {
-                                let file = parts[2].trim();
-                                let mut vars = HashMap::new();
-                                if let Some(orig) = &self.original_prompt {
-                                    vars.insert("nminput".to_string(), orig.clone());
-                                }
-                                let _ = inject_let_variables_in_file(
-                                    file,
-                                    &vars,
-                                    self.original_prompt.as_deref().unwrap_or(""),
-                                    content,   // ✅ latest output
-                                    &self.tx,
-                                );
-                            }
-                        }
                     }
 
                     if let Some(tool_calls) = &msg.tool_calls {
@@ -322,11 +303,34 @@ impl Agent for PomlAgent {
                     }
                 }
                 Err(e) => {
-                    let err = format!("Error: {}", e);
-                    return (err, None);
+                    final_output = format!("Error: {}", e);
+                    break;
                 }
             }
         }
+
+        // ✅ Update nmoutput in poml once with the final output
+        if !final_output.is_empty() {
+            for entry in &self.files {
+                let parts: Vec<&str> = entry.splitn(3, ':').collect();
+                if parts.len() == 3 {
+                    let file = parts[2].trim();
+                    let mut vars = HashMap::new();
+                    if let Some(orig) = &self.original_prompt {
+                        vars.insert("nminput".to_string(), orig.clone());
+                    }
+                    let _ = inject_let_variables_in_file(
+                        file,
+                        &vars,
+                        self.original_prompt.as_deref().unwrap_or(""),
+                        &final_output,
+                        &self.tx,
+                    );
+                }
+            }
+        }
+
+        (final_output, None)
     }
 
     fn get_name(&self) -> &str {
