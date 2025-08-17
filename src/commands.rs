@@ -1,6 +1,6 @@
 use crate::nm_config::{save_all_nm, WorkflowConfig};
 use crate::runner::AppCommand;
-use crate::app::ChatMessage;
+use crate::app::{ChatMessage, Mode};
 use tokio::sync::mpsc::UnboundedSender;
 use std::collections::HashMap;
 
@@ -11,10 +11,41 @@ pub fn handle_command(
     tx: &UnboundedSender<AppCommand>,
     messages: &mut Vec<ChatMessage>,
     selected_agent: &mut Option<usize>,
+    mode: &mut Mode, // ✅ allow switching modes
 ) {
     let mut it = line.split_whitespace();
     let cmd = it.next().unwrap_or("");
     match cmd {
+        "/cwd" => {
+            if let Some(path) = it.next() {
+                if let Some(cfg) = workflows.get_mut(active_workflow) {
+                    cfg.working_dir = path.to_string();
+                    let all: Vec<WorkflowConfig> = workflows.values().cloned().collect();
+                    let _ = save_all_nm(&all);
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: format!("Working directory set to '{}'", path),
+                    });
+                } else {
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "No active workflow selected.".into(),
+                    });
+                }
+            } else {
+                if let Some(cfg) = workflows.get(active_workflow) {
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: format!("Current working directory: {}", cfg.working_dir),
+                    });
+                } else {
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "No active workflow selected.".into(),
+                    });
+                }
+            }
+        }
         "/run" => {
             if let Some(name) = it.next() {
                 if name == "all" {
@@ -78,22 +109,45 @@ pub fn handle_command(
             }
         }
         "/create" => {
-            messages.push(ChatMessage {
-                from: "system",
-                text: "Entering create workflow mode".into(),
-            });
+            if let Some(name) = it.next() {
+                // ✅ If workflow exists, edit it. Otherwise, create new.
+                if workflows.contains_key(name) {
+                    *active_workflow = name.to_string();
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: format!("Editing existing workflow '{}'", name),
+                    });
+                } else {
+                    let mut new_cfg = WorkflowConfig::default();
+                    new_cfg.name = name.to_string();
+                    workflows.insert(name.to_string(), new_cfg);
+                    *active_workflow = name.to_string();
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: format!("Created new workflow '{}'", name),
+                    });
+                }
+            } else {
+                messages.push(ChatMessage {
+                    from: "system",
+                    text: "Entering create workflow mode".into(),
+                });
+            }
+            *mode = Mode::Create;
         }
         "/workflow" => {
             messages.push(ChatMessage {
                 from: "system",
                 text: "Entering workflow selection mode".into(),
             });
+            *mode = Mode::Workflow;
         }
         "/chat" => {
             messages.push(ChatMessage {
                 from: "system",
                 text: "Entering interactive chat mode with current workflow. Type your message directly.".into(),
             });
+            *mode = Mode::InteractiveChat;
         }
         "/agent" => {
             let mut parts = it;

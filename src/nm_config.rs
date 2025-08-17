@@ -18,6 +18,19 @@ pub struct AgentRow {
     pub iteration_delay_ms: u64,   // ✅ configurable delay
 }
 
+impl Default for AgentRow {
+    fn default() -> Self {
+        Self {
+            agent_type: AgentType::Agent,
+            files: String::new(),
+            max_iterations: 3,
+            on_success: None,
+            on_failure: None,
+            iteration_delay_ms: 200,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkflowConfig {
     pub name: String,
@@ -26,24 +39,19 @@ pub struct WorkflowConfig {
     pub model: String,
     pub temperature: f32,
     pub maximum_traversals: usize,
+    pub working_dir: String,   // ✅ new
 }
 
 impl Default for WorkflowConfig {
     fn default() -> Self {
         Self {
             name: "default".into(),
-            rows: vec![AgentRow {
-                agent_type: AgentType::Agent,
-                files: String::new(),
-                max_iterations: 3,
-                on_success: None,
-                on_failure: None,
-                iteration_delay_ms: 200, // ✅ default
-            }],
+            rows: vec![AgentRow::default()],
             active_agent_index: 0,
             model: "z-ai/glm-4.5".into(),
             temperature: 0.7,
             maximum_traversals: 20,
+            working_dir: ".".into(),   // ✅ default
         }
     }
 }
@@ -66,11 +74,12 @@ pub fn save_all_nm(cfgs: &[WorkflowConfig]) -> std::io::Result<()> {
         out.push_str(&format!("model:{}\n", cfg.model));
         out.push_str(&format!("temperature:{}\n", cfg.temperature));
         out.push_str(&format!("maximum_traversals:{}\n", cfg.maximum_traversals));
+        out.push_str(&format!("working_dir:{}\n", cfg.working_dir)); // ✅ save working_dir
         for (j, row) in cfg.rows.iter().enumerate() {
             out.push_str(&format!("agent_{}: {:?}\n", j + 1, row.agent_type));
             out.push_str(&format!("files:\"{}\"\n", row.files));
             out.push_str(&format!("maximum_iterations:{}\n", row.max_iterations));
-            out.push_str(&format!("iteration_delay_ms:{}\n", row.iteration_delay_ms)); // ✅ save delay
+            out.push_str(&format!("iteration_delay_ms:{}\n", row.iteration_delay_ms));
             out.push_str(&format!("on_success:{}\n", row.on_success.unwrap_or(-1)));
             out.push_str(&format!("on_failure:{}\n", row.on_failure.unwrap_or(-1)));
         }
@@ -147,6 +156,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
     let mut model = "z-ai/glm-4.5".to_string();
     let mut temperature = 0.7;
     let mut maximum_traversals = 20;
+    let mut working_dir = ".".to_string(); // ✅ default
 
     let mut push_current =
         |rows: &mut Vec<AgentRow>, cur: &mut Option<AgentRow>| {
@@ -176,6 +186,10 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
             maximum_traversals = rest.trim().parse::<usize>().unwrap_or(20);
             continue;
         }
+        if let Some(rest) = line.strip_prefix("working_dir:") {
+            working_dir = rest.trim().to_string();
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("agent_") {
             push_current(&mut rows, &mut cur_agent);
             let parts: Vec<&str> = rest.splitn(2, ':').collect();
@@ -194,7 +208,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
                     max_iterations: 3,
                     on_success: None,
                     on_failure: None,
-                    iteration_delay_ms: 200, // ✅ default
+                    iteration_delay_ms: 200,
                 });
             }
             continue;
@@ -238,14 +252,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
     push_current(&mut rows, &mut cur_agent);
 
     if rows.is_empty() {
-        rows.push(AgentRow {
-            agent_type: AgentType::Agent,
-            files: String::new(),
-            max_iterations: 3,
-            on_success: None,
-            on_failure: None,
-            iteration_delay_ms: 200,
-        });
+        rows.push(AgentRow::default());
     }
 
     Ok(WorkflowConfig {
@@ -255,6 +262,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
         model,
         temperature,
         maximum_traversals,
+        working_dir,
     })
 }
 

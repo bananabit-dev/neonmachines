@@ -99,12 +99,29 @@ pub fn render_create(
         trav_style,
     )]));
 
+    // ✅ Working directory
+    let wd_style = if focus == 5 {
+        Style::default().fg(Color::Black).bg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let wd_val = if focus == 5 && !input.is_empty() {
+        input.to_string()
+    } else {
+        cfg.working_dir.clone()
+    };
+    lines.push(Line::from(vec![Span::styled(
+        format!("Working Dir: {}", wd_val),
+        wd_style,
+    )]));
+
+    // Agents
     for (i, row) in cfg.rows.iter().enumerate() {
-        let type_focus = focus == (i * 5 + 5);
-        let files_focus = focus == (i * 5 + 6);
-        let max_focus = focus == (i * 5 + 7);
-        let success_focus = focus == (i * 5 + 8);
-        let failure_focus = focus == (i * 5 + 9);
+        let type_focus = focus == (i * 5 + 6);
+        let files_focus = focus == (i * 5 + 7);
+        let max_focus = focus == (i * 5 + 8);
+        let success_focus = focus == (i * 5 + 9);
+        let failure_focus = focus == (i * 5 + 10);
 
         let type_style = if type_focus {
             Style::default().fg(Color::Black).bg(Color::Cyan)

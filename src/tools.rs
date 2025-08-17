@@ -4,10 +4,8 @@ use llmgraph::models::tools::{Tool, Function, Parameters, Property};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::UnboundedSender;
-use regex::Regex;
 
 /// Helper to define properties
 fn prop(typ: &str, desc: &str) -> Property {
@@ -18,10 +16,21 @@ fn prop(typ: &str, desc: &str) -> Property {
     }
 }
 
+/// Resolve a path relative to working_dir
+fn resolve_path(working_dir: &str, path: &str) -> PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        Path::new(working_dir).join(p)
+    }
+}
+
 /// Built-in + extended tools
 pub fn builtin_tools_with_history(
     shared_history: SharedHistory,
     tx: UnboundedSender<AppEvent>,
+    working_dir: String,
 ) -> Vec<(Tool, Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>)> {
     let mut tools: Vec<(Tool, Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>)> = Vec::new();
 
@@ -32,6 +41,7 @@ pub fn builtin_tools_with_history(
     // pwd
     {
         let tx_clone = tx.clone();
+        let wd = working_dir.clone();
         let tool = Tool {
             tool_type: "function".into(),
             function: Function {
@@ -46,14 +56,10 @@ pub fn builtin_tools_with_history(
         };
         let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
             Box::new(move |_args| {
-                match env::current_dir() {
-                    Ok(p) => {
-                        let cwd = p.to_string_lossy().to_string();
-                        let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][pwd] {}", cwd)));
-                        Ok(json!({ "cwd": cwd }))
-                    }
-                    Err(e) => Err(e.to_string()),
-                }
+                let cwd = wd.clone();
+                let result = json!({ "cwd": cwd });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][pwd] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
@@ -61,6 +67,7 @@ pub fn builtin_tools_with_history(
     // ls
     {
         let tx_clone = tx.clone();
+        let wd = working_dir.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "Directory to list"));
         let tool = Tool {
@@ -78,23 +85,22 @@ pub fn builtin_tools_with_history(
         let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
             Box::new(move |args| {
                 let path = args["path"].as_str().unwrap_or(".");
-                let entries = fs::read_dir(path)
+                let full_path = resolve_path(&wd, path);
+                let entries = fs::read_dir(&full_path)
                     .map_err(|e| e.to_string())?
                     .map(|e| e.map(|e| e.file_name().to_string_lossy().to_string()).map_err(|e| e.to_string()))
                     .collect::<Result<Vec<_>, _>>()?;
-                let _ = tx_clone.send(AppEvent::Log(format!(
-                    "[TOOL][ls] {} entries in {}",
-                    entries.len(),
-                    path
-                )));
-                Ok(json!({ "entries": entries }))
+                let result = json!({ "entries": entries });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][ls] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
 
-    // mkdir (idempotent)
+    // mkdir
     {
         let tx_clone = tx.clone();
+        let wd = working_dir.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "Directory to create"));
         let tool = Tool {
@@ -112,23 +118,15 @@ pub fn builtin_tools_with_history(
         let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
             Box::new(move |args| {
                 let path = args["path"].as_str().ok_or("Missing path")?;
-                if Path::new(path).exists() {
-                    let _ = tx_clone.send(AppEvent::Log(format!(
-                        "[TOOL][mkdir] directory {} already exists",
-                        path
-                    )));
-                    return Ok(json!({ "status": "exists", "path": path }));
-                }
-                match fs::create_dir_all(path) {
-                    Ok(_) => {
-                        let _ = tx_clone.send(AppEvent::Log(format!(
-                            "[TOOL][mkdir] created directory {}",
-                            path
-                        )));
-                        Ok(json!({ "status": "ok", "path": path }))
-                    }
-                    Err(e) => Err(e.to_string()),
-                }
+                let full_path = resolve_path(&wd, path);
+                let result = if full_path.exists() {
+                    json!({ "status": "exists", "path": full_path })
+                } else {
+                    fs::create_dir_all(&full_path).map_err(|e| e.to_string())?;
+                    json!({ "status": "ok", "path": full_path })
+                };
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][mkdir] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
@@ -136,6 +134,7 @@ pub fn builtin_tools_with_history(
     // touch
     {
         let tx_clone = tx.clone();
+        let wd = working_dir.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "File to create or update timestamp"));
         let tool = Tool {
@@ -153,16 +152,12 @@ pub fn builtin_tools_with_history(
         let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
             Box::new(move |args| {
                 let path = args["path"].as_str().ok_or("Missing path")?;
-                match fs::OpenOptions::new().create(true).write(true).open(path) {
-                    Ok(_) => {
-                        let _ = tx_clone.send(AppEvent::Log(format!(
-                            "[TOOL][touch] touched file {}",
-                            path
-                        )));
-                        Ok(json!({ "status": "ok", "path": path }))
-                    }
-                    Err(e) => Err(e.to_string()),
-                }
+                let full_path = resolve_path(&wd, path);
+                fs::OpenOptions::new().create(true).write(true).open(&full_path)
+                    .map_err(|e| e.to_string())?;
+                let result = json!({ "status": "ok", "path": full_path });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][touch] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
@@ -170,6 +165,7 @@ pub fn builtin_tools_with_history(
     // delete_file
     {
         let tx_clone = tx.clone();
+        let wd = working_dir.clone();
         let mut props = HashMap::new();
         props.insert("path".into(), prop("string", "File path to delete"));
         let tool = Tool {
@@ -187,16 +183,11 @@ pub fn builtin_tools_with_history(
         let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
             Box::new(move |args| {
                 let path = args["path"].as_str().ok_or("Missing path")?;
-                match fs::remove_file(path) {
-                    Ok(_) => {
-                        let _ = tx_clone.send(AppEvent::Log(format!(
-                            "[TOOL][delete_file] deleted {}",
-                            path
-                        )));
-                        Ok(json!({ "status": "ok", "path": path }))
-                    }
-                    Err(e) => Err(e.to_string()),
-                }
+                let full_path = resolve_path(&wd, path);
+                fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+                let result = json!({ "status": "ok", "path": full_path });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][delete_file] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
@@ -205,7 +196,7 @@ pub fn builtin_tools_with_history(
     // File Writing Tools
     // -------------------------
 
-    // write_file (chunked)
+    // write_file
     {
         let tx_clone = tx.clone();
         let mut props = HashMap::new();
@@ -254,16 +245,14 @@ pub fn builtin_tools_with_history(
                     chunks += 1;
                 }
 
-                let _ = tx_clone.send(AppEvent::Log(format!(
-                    "[TOOL][write_file] wrote {} bytes in {} chunks to {} (append={})",
-                    total_bytes, chunks, path, append
-                )));
-                Ok(json!({
+                let result = json!({
                     "status": "ok",
                     "path": path,
                     "bytes_written": total_bytes,
                     "chunks": chunks
-                }))
+                });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][write_file] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
@@ -308,16 +297,18 @@ pub fn builtin_tools_with_history(
                         )));
                     }
                 }
-                Ok(json!({ "status": "ok", "path": path, "parts": parts.len() }))
+                let result = json!({ "status": "ok", "path": path, "parts": parts.len() });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][write_file_parts] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }
 
     // -------------------------
-    // File Reading Tool (NEW)
+    // File Reading Tool
     // -------------------------
 
-    // read_file_content (like cat, with optional args)
+    // read_file_content
     {
         let tx_clone = tx.clone();
         let mut props = HashMap::new();
@@ -370,27 +361,21 @@ pub fn builtin_tools_with_history(
                     selected.push(format!("{:>5}: {}", i, l));
                 }
 
-                let mut result = selected.join("\n");
-                if result.len() > max_bytes {
-                    result.truncate(max_bytes);
-                    result.push_str("\n...[truncated]");
+                let mut result_str = selected.join("\n");
+                if result_str.len() > max_bytes {
+                    result_str.truncate(max_bytes);
+                    result_str.push_str("\n...[truncated]");
                 }
 
-                let _ = tx_clone.send(AppEvent::Log(format!(
-                    "[TOOL][read_file_content] {} lines [{}..{}] from {}",
-                    selected.len(),
-                    start,
-                    end,
-                    path
-                )));
-
-                Ok(json!({
+                let result = json!({
                     "path": path,
                     "lines": selected.len(),
                     "start": start,
                     "end": end,
-                    "content": result
-                }))
+                    "content": result_str
+                });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][read_file_content] result = {}", result)));
+                Ok(result)
             });
 
         tools.push((tool, func));
@@ -421,11 +406,9 @@ pub fn builtin_tools_with_history(
                 Box::new(move |args| {
                     let text = args["text"].as_str().unwrap_or("");
                     let result = $func(text);
-                    let _ = tx_clone.send(AppEvent::Log(format!(
-                        "[TOOL][{}] input='{}' -> '{}' ",
-                        $name, text, result
-                    )));
-                    Ok(json!({ "result": result }))
+                    let result_json = json!({ "result": result });
+                    let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][{}] result = {}", $name, result_json)));
+                    Ok(result_json)
                 });
             tools.push((tool, func));
         }};
@@ -457,16 +440,13 @@ pub fn builtin_tools_with_history(
             Box::new(move |args| {
                 let text = args["text"].as_str().unwrap_or("");
                 let mut results = Vec::new();
-                for (i, para) in text.split("\n\n").enumerate() {
+                for para in text.split("\n\n") {
                     let decision = if para.to_lowercase().contains("yes") { "yes" } else { "no" };
-                    let _ = tx_clone.send(AppEvent::Log(format!(
-                        "[TOOL][yes_no_paragraphs] para {} -> {}",
-                        i + 1,
-                        decision
-                    )));
                     results.push(decision.to_string());
                 }
-                Ok(json!({ "decisions": results }))
+                let result = json!({ "decisions": results });
+                let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][yes_no_paragraphs] result = {}", result)));
+                Ok(result)
             });
         tools.push((tool, func));
     }

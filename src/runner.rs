@@ -49,6 +49,10 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 "Max traversals: {}",
                 cfg.maximum_traversals
             )));
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Working dir: {}",
+                cfg.working_dir
+            )));
 
             let mut graph = Graph::new();
 
@@ -58,8 +62,12 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 "[SharedHistory] Initialized global shared history".to_string(),
             ));
 
-            // ✅ Register tools with shared history + tx
-            for (tool, func) in builtin_tools_with_history(shared_history.clone(), log_tx.clone()) {
+            // ✅ Register tools with shared history + tx + working_dir
+            for (tool, func) in builtin_tools_with_history(
+                shared_history.clone(),
+                log_tx.clone(),
+                cfg.working_dir.clone(),
+            ) {
                 graph.register_tool(tool, func);
             }
 
@@ -94,7 +102,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
-                            shared_history.clone(), // ✅ FIX
+                            shared_history.clone(),
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -107,7 +115,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
-                            shared_history.clone(), // ✅ FIX
+                            shared_history.clone(),
                         );
                         let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
                         let failure_route =
@@ -242,6 +250,16 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
 
             let mut graph = Graph::new();
             let shared_history = SharedHistory::new();
+
+            // ✅ Register tools here too with working_dir
+            for (tool, func) in builtin_tools_with_history(
+                shared_history.clone(),
+                log_tx.clone(),
+                cfg.working_dir.clone(),
+            ) {
+                graph.register_tool(tool, func);
+            }
+
             for (i, row) in cfg.rows.iter().enumerate() {
                 let next_id = if i + 1 < cfg.rows.len() {
                     Some((i + 1) as i32)
@@ -259,7 +277,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
-                            shared_history.clone(), // ✅ FIX
+                            shared_history.clone(),
                         ))
                     }
                     AgentType::ValidatorAgent => {
@@ -272,7 +290,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                             cfg.temperature,
                             row.max_iterations,
                             log_tx.clone(),
-                            shared_history.clone(), // ✅ FIX
+                            shared_history.clone(),
                         );
                         Box::new(PomlValidatorAgent::new(
                             poml_validator,

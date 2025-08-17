@@ -145,7 +145,7 @@ impl App {
                             KeyCode::Tab => {
                                 self.create_focus += 1;
                                 let max_focus =
-                                    self.workflows[&self.active_workflow].rows.len() * 5 + 5;
+                                    self.workflows[&self.active_workflow].rows.len() * 5 + 6; // +6 because working_dir added
                                 if self.create_focus > max_focus {
                                     self.create_focus = 0;
                                 }
@@ -153,7 +153,7 @@ impl App {
                             KeyCode::BackTab => {
                                 if self.create_focus == 0 {
                                     self.create_focus =
-                                        self.workflows[&self.active_workflow].rows.len() * 5 + 5;
+                                        self.workflows[&self.active_workflow].rows.len() * 5 + 6;
                                 } else {
                                     self.create_focus -= 1;
                                 }
@@ -212,6 +212,7 @@ impl App {
                 }
             }
             Event::Paste(s) => {
+                // ✅ Multi-line paste support: insert as-is into input buffer
                 for ch in s.chars() {
                     self.insert_char(ch);
                 }
@@ -220,8 +221,6 @@ impl App {
         }
         false
     }
-
-
 
     pub async fn poll_async(&mut self) {
         while let Ok(ev) = self.rx.try_recv() {
@@ -288,32 +287,21 @@ impl App {
                 &mut self.active_workflow,
                 &self.tx,
                 &mut self.messages,
-                &mut self.selected_agent, // Pass a mutable reference to selected_agent
+                &mut self.selected_agent,
+                &mut self.mode, // ✅ pass mode so /create can switch
             );
-            if line.starts_with("/create") {
-                self.mode = Mode::Create;
-            }
-            if line.starts_with("/workflow") && !line.contains(' ') {
-                self.mode = Mode::Workflow;
-                self.workflow_list = self.workflows.values().cloned().collect();
-                self.workflow_index = 0;
-            }
-            if line.starts_with("/chat") {
-                self.mode = Mode::InteractiveChat;
-                self.add_message("system", "Entered interactive chat mode. Press ESC to exit.".to_string());
-            }
         } else {
             if let Some(cfg) = self.workflows.get(&self.active_workflow) {
                 let user_prompt = if self.mode == Mode::InteractiveChat {
-                    line.clone() // In interactive mode, send the line directly
+                    line.clone()
                 } else {
-                    format!("User: {}", line) // In normal mode, prefix with "User:"
+                    format!("User: {}", line)
                 };
                 let _ = self.tx.send(AppCommand::RunWorkflow {
                     workflow_name: cfg.name.clone(),
                     prompt: user_prompt,
                     cfg: cfg.clone(),
-                    start_agent: self.selected_agent, // Use selected agent or None for default
+                    start_agent: self.selected_agent,
                 });
             } else {
                 self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
@@ -344,10 +332,20 @@ impl App {
                         "error" => Style::default().fg(Color::Red).bold(),
                         _ => Style::default(),
                     };
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{}: ", m.from), style),
-                        Span::styled(m.text.clone(), style),
-                    ]));
+                    // ✅ Support multi-line messages
+                    for (i, part) in m.text.lines().enumerate() {
+                        if i == 0 {
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{}: ", m.from), style),
+                                Span::styled(part.to_string(), style),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::styled("    ", style),
+                                Span::styled(part.to_string(), style),
+                            ]));
+                        }
+                    }
                 }
                 let text = Text::from(lines);
                 let para = Paragraph::new(text)
@@ -393,15 +391,24 @@ impl App {
                     let style = match m.from {
                         "you" => Style::default().fg(Color::Cyan).bold(),
                         "system" => Style::default().fg(Color::Gray).italic(),
-                        "progress" => Style::default().fg(Color::Yellow),
+                        "progress" => Style::default().fg(Color::Rgb(223, 241, 28)),
                         "agent" => Style::default().fg(Color::Green),
                         "error" => Style::default().fg(Color::Red).bold(),
                         _ => Style::default(),
                     };
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{}: ", m.from), style),
-                        Span::styled(m.text.clone(), style),
-                    ]));
+                    for (i, part) in m.text.lines().enumerate() {
+                        if i == 0 {
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{}: ", m.from), style),
+                                Span::styled(part.to_string(), style),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::styled("    ", style),
+                                Span::styled(part.to_string(), style),
+                            ]));
+                        }
+                    }
                 }
                 let text = Text::from(lines);
                 let para = Paragraph::new(text)
