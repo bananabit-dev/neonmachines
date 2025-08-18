@@ -153,7 +153,7 @@ pub async fn retry_with_backoff<T, F, E>(
 ) -> Result<T, E>
 where
     F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send>>,
-    E: std::fmt::Debug,
+    E: std::fmt::Debug + Clone,
 {
     let mut delay_ms = config.base_delay_ms;
     let mut last_error: Option<E> = None;
@@ -282,7 +282,7 @@ pub async fn retry_with_circuit_breaker<T, F, E>(
 ) -> Result<T, E>
 where
     F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send>>,
-    E: std::fmt::Debug,
+    E: std::fmt::Debug + Clone,
 {
     // Check if circuit breaker is open
     if !circuit_breaker.should_allow_request() {
@@ -295,7 +295,7 @@ where
     match &result {
         Ok(_) => {
             circuit_breaker.record_success();
-            info!("Circuit breaker reset after successful operation ");
+            info!("Circuit breaker reset after successful operation");
         }
         Err(e) => {
             circuit_breaker.record_failure();
@@ -316,41 +316,54 @@ pub async fn generate_with_retry(
     tools: Option<Vec<llmgraph::models::tools::Tool>>,
     retry_config: Option<RetryConfig>,
     circuit_breaker: Option<&mut CircuitBreaker>,
-) -> Result<llmgraph::generate::generate::LLMResponse, llmgraph::generate::generate::GenerateError> {
+) -> Result<serde_json::Value, NeonmachinesError> {
     let config = retry_config.unwrap_or_else(RetryConfig::default);
     
+    // Create a simple retry wrapper for generate_full_response
+    let operation = || {
+        let base_url_clone = base_url.clone();
+        let api_key_clone = api_key.clone();
+        let model_clone = model.clone();
+        let messages_clone = messages.clone();
+        let tools_clone = tools.clone();
+        
+        Box::pin(async move {
+            let result = llmgraph::generate::generate::generate_full_response(
+                base_url_clone,
+                api_key_clone,
+                model_clone,
+                temperature,
+                messages_clone,
+                tools_clone,
+            )
+            .await;
+            
+            match result {
+                Ok(response) => {
+                    // Convert LLMResponse to Value for easier handling
+                    let response_json = serde_json::json!({
+                        "success": true,
+                        "response": response,
+                        "model": model,
+                        "temperature": temperature
+                    });
+                    Ok(response_json)
+                }
+                Err(e) => Err(NeonmachinesError::Unexpected(format!("API call failed: {}", e)))
+            }
+        })
+    };
+
     // Apply retry logic with optional circuit breaker
     if let Some(mut cb) = circuit_breaker {
-        retry_with_circuit_breaker(&mut cb, &config, {
-            move || {
-                Box::pin(async move {
-                    llmgraph::generate::generate::generate_full_response(
-                        base_url.clone(),
-                        api_key.clone(),
-                        model.clone(),
-                        temperature,
-                        messages.clone(),
-                        tools.clone(),
-                    )
-                    .await
-                })
-            }
-        }).await
+        match retry_with_circuit_breaker(&mut cb, &config, operation).await {
+            Ok(result) => Ok(result),
+            Err(e) => Err(e)
+        }
     } else {
-        retry_with_backoff(&config, {
-            move || {
-                Box::pin(async move {
-                    llmgraph::generate::generate::generate_full_response(
-                        base_url.clone(),
-                        api_key.clone(),
-                        model.clone(),
-                        temperature,
-                        messages.clone(),
-                        tools.clone(),
-                    )
-                    .await
-                })
-            }
-        }).await
+        match retry_with_backoff(&config, operation).await {
+            Ok(result) => Ok(result),
+            Err(e) => Err(e)
+        }
     }
 }

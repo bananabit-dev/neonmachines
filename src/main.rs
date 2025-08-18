@@ -25,9 +25,9 @@ use cli::{AppMode, Cli};
 use poml::handle_poml_execution;
 
 // Import logging modules
-use tracing::{error, warn, info, debug, instrument};
+use tracing::{error, warn, info, instrument};
 use tracing_appender::{non_blocking, rolling};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 /// Initialize logging based on CLI configuration
 #[instrument]
@@ -51,7 +51,6 @@ fn init_logging(cli: &Cli) -> Result<()> {
                 .with_target(false)
                 .with_thread_ids(true)
                 .with_thread_names(true)
-                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
                 .with_writer(std::io::stdout)
                 .with_filter(level_filter)
         )
@@ -61,7 +60,6 @@ fn init_logging(cli: &Cli) -> Result<()> {
                 .with_target(false)
                 .with_thread_ids(true)
                 .with_thread_names(true)
-                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
                 .with_writer(non_blocking)
                 .with_filter(level_filter)
         )
