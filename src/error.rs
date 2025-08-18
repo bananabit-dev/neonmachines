@@ -391,21 +391,27 @@ pub async fn generate_with_retry(
     let config = retry_config.unwrap_or_else(RetryConfig::default);
     
     // Create a simple retry wrapper for generate_full_response
-    let operation = || {
-        let base_url_clone = base_url.clone();
-        let api_key_clone = api_key.clone();
-        let model_clone = model.clone();
-        let messages_clone = messages.clone();
-        let tools_clone = tools.clone();
+    let base_url_clone = base_url.clone();
+    let api_key_clone = api_key.clone();
+    let model_clone = model.clone();
+    let messages_clone = messages.clone();
+    let tools_clone = tools.clone();
+    
+    let operation = move || {
+        let base_url_final = base_url_clone.clone();
+        let api_key_final = api_key_clone.clone();
+        let model_final = model_clone.clone();
+        let messages_final = messages_clone.clone();
+        let tools_final = tools_clone.clone();
         
         Box::pin(async move {
             let result = llmgraph::generate::generate::generate_full_response(
-                base_url_clone,
-                api_key_clone,
-                model_clone,
+                base_url_final,
+                api_key_final,
+                model_final,
                 temperature,
-                messages_clone,
-                tools_clone,
+                messages_final,
+                tools_final,
             )
             .await;
             
@@ -429,12 +435,12 @@ pub async fn generate_with_retry(
     if let Some(mut cb) = circuit_breaker {
         match retry_with_circuit_breaker(&mut cb, &config, operation).await {
             Ok(result) => Ok(result),
-            Err(e) => Err(e)
+            Err(e) => Err(NeonmachinesError::Unexpected(format!("Circuit breaker error: {}", e)))
         }
     } else {
         match retry_with_backoff(&config, operation).await {
             Ok(result) => Ok(result),
-            Err(e) => Err(e)
+            Err(e) => Err(NeonmachinesError::Unexpected(format!("Retry error: {}", e)))
         }
     }
 }
