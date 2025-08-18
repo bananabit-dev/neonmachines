@@ -1,6 +1,6 @@
 use crate::commands::handle_command;
 use crate::create_ui::render_create;
-use crate::nm_config::{WorkflowConfig, save_all_nm};
+use crate::nm_config::{save_all_nm, AgentRow, AgentType, WorkflowConfig};
 use crate::runner::{AppCommand, AppEvent};
 use crate::workflow_ui::render_workflow;
 use ratatui::Frame;
@@ -42,7 +42,7 @@ pub struct App {
     pub create_focus: usize,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
-    
+
     pub selected_agent: Option<usize>,
 }
 
@@ -143,7 +143,10 @@ impl App {
                             KeyCode::Esc => {
                                 if self.mode == Mode::InteractiveChat {
                                     self.mode = Mode::Chat;
-                                    self.add_message("system", "Exited interactive chat mode".to_string());
+                                    self.add_message(
+                                        "system",
+                                        "Exited interactive chat mode".to_string(),
+                                    );
                                 }
                             }
                             _ => {}
@@ -173,13 +176,87 @@ impl App {
                             }
                             KeyCode::Enter => {
                                 if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
-                                    // (unchanged create logic for editing workflow fields)
+                                    match self.create_focus {
+                                        0 => cfg.name = self.input.clone(),
+                                        1 => cfg.model = self.input.clone(),
+                                        2 => {
+                                            if let Ok(val) = self.input.parse::<f32>() {
+                                                cfg.temperature = val;
+                                            }
+                                        }
+                                        3 => {
+                                            if let Ok(val) = self.input.parse::<usize>() {
+                                                // resize rows if number of agents changes
+                                                if val > cfg.rows.len() {
+                                                    cfg.rows.resize(val, AgentRow::default());
+                                                } else {
+                                                    cfg.rows.truncate(val);
+                                                }
+                                            }
+                                        }
+                                        4 => {
+                                            if let Ok(val) = self.input.parse::<usize>() {
+                                                cfg.maximum_traversals = val;
+                                            }
+                                        }
+                                        5 => cfg.working_dir = self.input.clone(),
+                                        _ => {
+                                            // agent-specific fields
+                                            let agent_idx = (self.create_focus - 6) / 5;
+                                            let field = (self.create_focus - 6) % 5;
+                                            if let Some(row) = cfg.rows.get_mut(agent_idx) {
+                                                match field {
+                                                    0 => {
+                                                        // agent type
+                                                        row.agent_type = match self
+                                                            .input
+                                                            .to_lowercase()
+                                                            .as_str()
+                                                        {
+                                                            "validator" => {
+                                                                AgentType::ValidatorAgent
+                                                            }
+                                                            "parallel" => AgentType::ParallelAgent,
+                                                            _ => AgentType::Agent,
+                                                        };
+                                                    }
+                                                    1 => row.files = self.input.clone(),
+                                                    2 => {
+                                                        if let Ok(val) = self.input.parse::<usize>()
+                                                        {
+                                                            row.max_iterations = val;
+                                                        }
+                                                    }
+                                                    3 => {
+                                                        if let Ok(val) = self.input.parse::<i32>() {
+                                                            row.on_success = if val >= 0 {
+                                                                Some(val)
+                                                            } else {
+                                                                None
+                                                            };
+                                                        }
+                                                    }
+                                                    4 => {
+                                                        if let Ok(val) = self.input.parse::<i32>() {
+                                                            row.on_failure = if val >= 0 {
+                                                                Some(val)
+                                                            } else {
+                                                                None
+                                                            };
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 self.input.clear();
                             }
                             KeyCode::Esc => {
                                 // ✅ Save all workflows when exiting create mode
-                                let all: Vec<WorkflowConfig> = self.workflows.values().cloned().collect();
+                                let all: Vec<WorkflowConfig> =
+                                    self.workflows.values().cloned().collect();
                                 let _ = save_all_nm(&all);
                                 self.mode = Mode::Chat;
                             }
@@ -310,7 +387,10 @@ impl App {
                     start_agent: self.selected_agent,
                 });
             } else {
-                self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
+                self.add_message(
+                    "system",
+                    "No active workflow selected. Use /workflow to select one.".to_string(),
+                );
             }
         }
         self.input.clear();
