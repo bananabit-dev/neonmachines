@@ -267,10 +267,11 @@ where
 
     // If we get here, all attempts failed
     if let Some(retryable_type) = last_retryable_type {
+        let retryable_msg = format!("{:?}", retryable_type);
         error!(
-            "Operation failed after {} attempts. Last retryable error type: {:?}. Final error: {:?}",
+            "Operation failed after {} attempts. Last retryable error type: {}. Final error: {:?}",
             config.max_attempts,
-            retryable_type,
+            retryable_msg,
             last_error
         );
     } else {
@@ -417,11 +418,11 @@ pub async fn generate_with_retry(
                         "model": model,
                         "temperature": temperature
                     });
-                    Ok(response_json)
+                    Ok::<serde_json::Value, NeonmachinesError>(response_json)
                 }
-                Err(e) => Err(NeonmachinesError::Unexpected(format!("API call failed: {}", e)))
+                Err(e) => Err::<serde_json::Value, NeonmachinesError>(NeonmachinesError::Unexpected(format!("API call failed: {}", e)))
             }
-        })
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, NeonmachinesError>> + Send>>
     };
 
     // Apply retry logic with optional circuit breaker
