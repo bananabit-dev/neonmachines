@@ -1,7 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use crate::error::{NeonmachinesError, NeonmachinesResult};
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(
     name = "neonmachines",
     about = "A graph-based AI Orchestration framework with professional UI",
@@ -77,7 +78,7 @@ pub struct Cli {
     pub experimental: bool,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run the TUI interface
     Tui {
@@ -280,6 +281,122 @@ impl Cli {
                 _ => None,
             })
             .unwrap_or(self.host.clone())
+    }
+
+    /// Validate CLI configuration and return appropriate error if invalid
+    pub fn validate(&self) -> NeonmachinesResult<()> {
+        // Validate log level
+        match self.log_level.as_str() {
+            "trace" | "debug" | "info" | "warn" | "error" => {
+                // Valid log level
+            }
+            _ => return Err(NeonmachinesError::cli(format!(
+                "Invalid log level: {}. Must be one of: trace, debug, info, warn, error",
+                self.log_level
+            ))),
+        }
+
+        // Validate port range
+        if self.port == 0 || self.port > 65535 {
+            return Err(NeonmachinesError::cli(format!(
+                "Invalid port: {}. Must be between 1 and 65535",
+                self.port
+            )));
+        }
+
+        // Validate rate limit
+        if self.rate_limit == 0 {
+            return Err(NeonmachinesError::cli(
+                "Rate limit must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate temperature for POML commands
+        if let Some(Commands::Poml { temperature, .. }) = &self.command {
+            if *temperature < 0.0 || *temperature > 2.0 {
+                return Err(NeonmachinesError::cli(
+                    "Temperature must be between 0.0 and 2.0".to_string(),
+                ));
+            }
+        }
+
+        // Validate max tokens for POML commands
+        if let Some(Commands::Poml { max_tokens, .. }) = &self.command {
+            if *max_tokens == 0 || *max_tokens > 100000 {
+                return Err(NeonmachinesError::cli(
+                    "Max tokens must be between 1 and 100000".to_string(),
+                ));
+            }
+        }
+
+        // Validate working directory exists if specified
+        if let Some(ref working_dir) = self.working_dir {
+            if !working_dir.exists() {
+                return Err(NeonmachinesError::file_system(format!(
+                    "Working directory does not exist: {}",
+                    working_dir.display()
+                )));
+            }
+            if !working_dir.is_dir() {
+                return Err(NeonmachinesError::file_system(format!(
+                    "Working path is not a directory: {}",
+                    working_dir.display()
+                )));
+            }
+        }
+
+        // Validate POML file exists if specified
+        if let Some(ref poml_file) = self.poml_file {
+            if !poml_file.exists() {
+                return Err(NeonmachinesError::file_system(format!(
+                    "POML file does not exist: {}",
+                    poml_file.display()
+                )));
+            }
+            if !poml_file.is_file() {
+                return Err(NeonmachinesError::file_system(format!(
+                    "POML path is not a file: {}",
+                    poml_file.display()
+                )));
+            }
+        }
+
+        // Validate output file directory if specified for POML commands
+        if let Some(Commands::Poml { output: Some(output), .. }) = &self.command {
+            if let Some(parent) = output.parent() {
+                if !parent.exists() {
+                    return Err(NeonmachinesError::file_system(format!(
+                        "Output directory does not exist: {}",
+                        parent.display()
+                    )));
+                }
+                if !parent.is_dir() {
+                    return Err(NeonmachinesError::file_system(format!(
+                        "Output path is not a directory: {}",
+                        parent.display()
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get log level as tracing::Level
+    pub fn get_tracing_level(&self) -> tracing::Level {
+        match self.log_level.as_str() {
+            "trace" => tracing::Level::TRACE,
+            "debug" => tracing::Level::DEBUG,
+            "info" => tracing::Level::INFO,
+            "warn" => tracing::Level::WARN,
+            "error" => tracing::Level::ERROR,
+            _ => tracing::Level::INFO,
+        }
+    }
+
+    /// Check if verbose logging is enabled
+    pub fn is_verbose(&self) -> bool {
+        self.verbose || self.log_level == "debug" || self.log_level == "trace"
     }
 }
 

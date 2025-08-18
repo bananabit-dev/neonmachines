@@ -1,0 +1,5 @@
+<let name="test" value="Multi-line test"></let>{{prompt}}
+
+This is a multi-line prompt
+that should be handled correctly
+by the input system.

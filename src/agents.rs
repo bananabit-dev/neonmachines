@@ -1,5 +1,6 @@
 use crate::runner::AppEvent;
 use crate::shared_history::SharedHistory;
+use crate::error::{generate_with_retry, RetryConfig, CircuitBreaker};
 use async_trait::async_trait;
 use dotenv::dotenv;
 use llmgraph::generate::generate::generate_full_response;
@@ -276,13 +277,26 @@ impl Agent for PomlAgent {
                 break;
             }
 
-            let resp = generate_full_response(
+            // Initialize retry configuration
+            let retry_config = RetryConfig {
+                max_attempts: 3,
+                base_delay_ms: 1000,
+                max_delay_ms: 10000,
+                backoff_factor: 2.0,
+            };
+            
+            // Initialize circuit breaker
+            let mut circuit_breaker = CircuitBreaker::new(5, std::time::Duration::from_secs(60));
+            
+            let resp = generate_with_retry(
                 base_url.clone(),
                 api_key.clone(),
                 self.model.clone(),
                 self.temperature,
                 messages.clone(),
                 Some(tools.clone()),
+                Some(retry_config),
+                Some(&mut circuit_breaker),
             )
             .await;
 

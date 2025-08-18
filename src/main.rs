@@ -9,6 +9,7 @@ mod shared_history;
 mod cli;
 mod poml;
 mod rate_limiter;
+mod error;
 
 use color_eyre::Result;
 use crossterm::event;
@@ -22,6 +23,59 @@ use runner::{run_workflow, AppCommand, AppEvent};
 use tui::{restore_terminal, setup_terminal};
 use cli::{AppMode, Cli};
 use poml::handle_poml_execution;
+
+// Import logging modules
+use tracing::{error, warn, info, debug, instrument};
+use tracing_appender::{non_blocking, rolling};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Initialize logging based on CLI configuration
+#[instrument]
+fn init_logging(cli: &Cli) -> Result<()> {
+    let level_filter = cli.get_tracing_level();
+
+    // Create file writer for rolling logs
+    let file_appender = if let Some(log_file) = &cli.log_file {
+        rolling::daily("logs", log_file)
+    } else {
+        rolling::daily("logs", "neonmachines.log")
+    };
+
+    let (non_blocking, _guard) = non_blocking(file_appender);
+
+    // Set up tracing subscriber
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
+                .with_writer(std::io::stdout)
+                .with_filter(level_filter)
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
+                .with_writer(non_blocking)
+                .with_filter(level_filter)
+        )
+        .with(tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("{}={}", env!("CARGO_PKG_NAME"), level_filter))))
+        .init();
+
+    info!("Logging initialized with level: {}", cli.log_level);
+    if let Some(log_file) = &cli.log_file {
+        info!("Logs will be written to: {}", log_file.display());
+    }
+
+    Ok(())
+}
 
 impl Default for Cli {
     fn default() -> Self {
@@ -96,26 +150,51 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Initialize logging
+    info!("Starting Neonmachines v{}", env!("CARGO_PKG_VERSION"));
+    
+    // Validate CLI configuration
+    if let Err(e) = cli.validate() {
+        error!("CLI validation failed: {}", e);
+        eprintln!("Configuration error: {}", e);
+        return Err(e.into());
+    }
+    
+    if let Err(e) = init_logging(&cli) {
+        error!("Failed to initialize logging: {}", e);
+        eprintln!("Failed to initialize logging: {}", e);
+        return Err(e.into());
+    }
+
     // Handle POML file execution if specified
     if let Some(poml_file) = &cli.poml_file {
+        info!("Executing POML file: {}", poml_file.display());
         let (tx_evt, _) = mpsc::unbounded_channel::<AppEvent>();
         let working_dir = cli.working_dir.clone();
         
         match handle_poml_execution(poml_file, working_dir, tx_evt).await {
-            Ok(_) => println!("POML execution completed successfully"),
-            Err(e) => eprintln!("POML execution failed: {}", e),
+            Ok(_) => {
+                info!("POML execution completed successfully");
+                println!("POML execution completed successfully");
+            }
+            Err(e) => {
+                error!("POML execution failed: {}", e);
+                eprintln!("POML execution failed: {}", e);
+            }
         }
         return Ok(());
     }
 
     // Initialize rate limiter if enabled
     if cli.enable_rate_limit {
+        info!("Rate limiting enabled with limit: {} requests/minute", cli.rate_limit);
         println!("Rate limiting enabled with limit: {} requests/minute", cli.rate_limit);
         // Initialize rate limiter here
     }
 
     // Determine mode based on CLI arguments
     let mode = cli.get_mode();
+    info!("Running in {:?} mode", mode);
     
     match mode {
         AppMode::Web => run_web(cli).await,

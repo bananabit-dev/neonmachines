@@ -86,7 +86,7 @@ mod tests {
         let limiter = RateLimiter::new_with_limit(5);
         
         // Should allow first 5 requests
-        for i in 0..5 {
+        for _i in 0..5 {
             assert!(limiter.check_rate_limit("test", 5, Duration::from_secs(1)).await);
         }
         

@@ -1582,6 +1582,7 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "toml",

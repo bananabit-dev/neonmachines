@@ -60,6 +60,7 @@ ignore = "0.4"
 which = "6.0"
 ratelimit = "0.4.1"
 tower_governor = "0.4"
+thiserror = "1.0"
 
 [[bin]]
 name = "neonmachines"
