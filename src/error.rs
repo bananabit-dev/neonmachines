@@ -1,6 +1,10 @@
 use thiserror::Error;
+use tracing::info;
+use tracing::warn;
+use tracing::debug;
+use tracing::error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum NeonmachinesError {
     #[error("Configuration error: {0}")]
     Config(String),
@@ -29,23 +33,72 @@ pub enum NeonmachinesError {
     #[error("CLI argument error: {0}")]
     Cli(String),
 
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("TOML parsing error: {0}")]
-    Toml(#[from] toml::de::Error),
-
-    #[error("UTF-8 conversion error: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
-
     #[error("Parse error: {0}")]
     Parse(String),
 
     #[error("Unexpected error: {0}")]
     Unexpected(String),
+
+    #[error("IO error: {0}")]
+    Io(String),
+
+    #[error("JSON error: {0}")]
+    Json(String),
+
+    #[error("TOML parsing error: {0}")]
+    Toml(String),
+
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8(String),
+}
+
+// Wrapper for non-Clone errors that need to be cloned
+#[derive(Error, Debug, Clone)]
+pub enum NeonmachinesErrorWrapper {
+    #[error("IO error: {0}")]
+    Io(std::io::Error),
+
+    #[error("JSON error: {0}")]
+    Json(serde_json::Error),
+
+    #[error("TOML parsing error: {0}")]
+    Toml(toml::de::Error),
+
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8(std::string::FromUtf8Error),
+
+    #[error("Other error: {0}")]
+    Other(NeonmachinesError),
+}
+
+impl From<std::io::Error> for NeonmachinesErrorWrapper {
+    fn from(err: std::io::Error) -> Self {
+        NeonmachinesErrorWrapper::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for NeonmachinesErrorWrapper {
+    fn from(err: serde_json::Error) -> Self {
+        NeonmachinesErrorWrapper::Json(err)
+    }
+}
+
+impl From<toml::de::Error> for NeonmachinesErrorWrapper {
+    fn from(err: toml::de::Error) -> Self {
+        NeonmachinesErrorWrapper::Toml(err)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for NeonmachinesErrorWrapper {
+    fn from(err: std::string::FromUtf8Error) -> Self {
+        NeonmachinesErrorWrapper::Utf8(err)
+    }
+}
+
+impl From<NeonmachinesError> for NeonmachinesErrorWrapper {
+    fn from(err: NeonmachinesError) -> Self {
+        NeonmachinesErrorWrapper::Other(err)
+    }
 }
 
 impl NeonmachinesError {
@@ -91,6 +144,22 @@ impl NeonmachinesError {
 
     pub fn unexpected<S: Into<String>>(msg: S) -> Self {
         NeonmachinesError::Unexpected(msg.into())
+    }
+
+    pub fn io<S: Into<String>>(msg: S) -> Self {
+        NeonmachinesError::Io(msg.into())
+    }
+
+    pub fn json<S: Into<String>>(msg: S) -> Self {
+        NeonmachinesError::Json(msg.into())
+    }
+
+    pub fn toml<S: Into<String>>(msg: S) -> Self {
+        NeonmachinesError::Toml(msg.into())
+    }
+
+    pub fn utf8<S: Into<String>>(msg: S) -> Self {
+        NeonmachinesError::Utf8(msg.into())
     }
 }
 
@@ -174,11 +243,12 @@ where
                 let retryable_type = is_retryable_error(&e);
                 
                 if let Some(retryable) = retryable_type {
+                    let retryable_msg = format!("{:?}", retryable);
                     last_retryable_type = Some(retryable);
                     warn!(
-                        "Attempt {} failed with retryable error {:?}, retrying in {}ms. Error: {:?}",
+                        "Attempt {} failed with retryable error {}, retrying in {}ms. Error: {:?}",
                         attempt + 1,
-                        retryable,
+                        retryable_msg,
                         delay_ms,
                         e
                     );

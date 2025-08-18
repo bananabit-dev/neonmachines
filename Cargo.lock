@@ -1400,9 +1400,9 @@ checksum = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956"
 
 [[package]]
 name = "llmgraph"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19fb95f2ff9d01bbbba636869f38705d2fa0b71164f44b3db0e965c565c90487"
+checksum = "36822a9c94427fd3e6aa146b3265852288990945da45e26b77f30b0e1bf1227a"
 dependencies = [
  "async-trait",
  "futures",

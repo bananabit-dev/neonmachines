@@ -27,7 +27,6 @@ use poml::handle_poml_execution;
 // Import logging modules
 use tracing::{error, warn, info, instrument};
 use tracing_appender::{non_blocking, rolling};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 /// Initialize logging based on CLI configuration
 #[instrument]
@@ -44,27 +43,13 @@ fn init_logging(cli: &Cli) -> Result<()> {
     let (non_blocking, _guard) = non_blocking(file_appender);
 
     // Set up tracing subscriber
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .compact()
-                .with_target(false)
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_writer(std::io::stdout)
-                .with_filter(level_filter)
-        )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .compact()
-                .with_target(false)
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_writer(non_blocking)
-                .with_filter(level_filter)
-        )
-        .with(tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(format!("{}={}", env!("CARGO_PKG_NAME"), level_filter))))
+    tracing_subscriber::fmt()
+        .compact()
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_writer(std::io::stdout)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     info!("Logging initialized with level: {}", cli.log_level);

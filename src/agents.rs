@@ -1,6 +1,6 @@
 use crate::runner::AppEvent;
 use crate::shared_history::SharedHistory;
-use crate::error::{generate_with_retry, RetryConfig, CircuitBreaker, NeonmachinesError};
+use crate::error::{generate_with_retry, RetryConfig, CircuitBreaker};
 use async_trait::async_trait;
 use dotenv::dotenv;
 use llmgraph::models::graph::Agent;
@@ -303,7 +303,7 @@ impl Agent for PomlAgent {
                 Ok(r) => {
                     // Extract the actual LLM response from the JSON wrapper
                     if let Some(response_obj) = r.get("response") {
-                        if let Ok(llm_response) = serde_json::from_value::<llmgraph::generate::generate::LLMResponse>(response_obj.clone()) {
+                        if let Ok(llm_response) = serde_json::from_value::<llmgraph::models::tools::LLMResponse>(response_obj.clone()) {
                             llm_response
                         } else {
                             final_output = format!("Error: Failed to parse LLM response: {}", response_obj);
