@@ -31,7 +31,7 @@ use tracing_appender::{non_blocking, rolling};
 /// Initialize logging based on CLI configuration
 #[instrument]
 fn init_logging(cli: &Cli) -> Result<()> {
-    let level_filter = cli.get_tracing_level();
+    let _level_filter = cli.get_tracing_level();
 
     // Create file writer for rolling logs
     let file_appender = if let Some(log_file) = &cli.log_file {
@@ -40,7 +40,7 @@ fn init_logging(cli: &Cli) -> Result<()> {
         rolling::daily("logs", "neonmachines.log")
     };
 
-    let (non_blocking, _guard) = non_blocking(file_appender);
+    let (_non_blocking, _guard) = non_blocking(file_appender);
 
     // Set up tracing subscriber
     tracing_subscriber::fmt()

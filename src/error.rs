@@ -53,7 +53,7 @@ pub enum NeonmachinesError {
 }
 
 // Wrapper for non-Clone errors that need to be cloned
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum NeonmachinesErrorWrapper {
     #[error("IO error: {0}")]
     Io(std::io::Error),
@@ -160,6 +160,12 @@ impl NeonmachinesError {
 
     pub fn utf8<S: Into<String>>(msg: S) -> Self {
         NeonmachinesError::Utf8(msg.into())
+    }
+}
+
+impl From<String> for NeonmachinesError {
+    fn from(s: String) -> Self {
+        NeonmachinesError::Unexpected(s)
     }
 }
 
@@ -353,7 +359,7 @@ pub async fn retry_with_circuit_breaker<T, F, E>(
 ) -> Result<T, E>
 where
     F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E>> + Send>>,
-    E: std::fmt::Debug + Clone,
+    E: std::fmt::Debug + Clone + From<String>,
 {
     // Check if circuit breaker is open
     if !circuit_breaker.should_allow_request() {
@@ -368,7 +374,7 @@ where
             circuit_breaker.record_success();
             info!("Circuit breaker reset after successful operation");
         }
-        Err(e) => {
+        Err(_e) => {
             circuit_breaker.record_failure();
             warn!("Circuit breaker failure recorded. Current failure count: {}", circuit_breaker.failure_count);
         }
@@ -391,27 +397,22 @@ pub async fn generate_with_retry(
     let config = retry_config.unwrap_or_else(RetryConfig::default);
     
     // Create a simple retry wrapper for generate_full_response
-    let base_url_clone = base_url.clone();
-    let api_key_clone = api_key.clone();
-    let model_clone = model.clone();
-    let messages_clone = messages.clone();
-    let tools_clone = tools.clone();
-    
-    let operation = move || {
-        let base_url_final = base_url_clone.clone();
-        let api_key_final = api_key_clone.clone();
-        let model_final = model_clone.clone();
-        let messages_final = messages_clone.clone();
-        let tools_final = tools_clone.clone();
+    let operation = || {
+        let base_url = base_url.clone();
+        let api_key = api_key.clone();
+        let model_for_response = model.clone(); // Clone here for the response
+        let model_for_api = model.clone(); // Clone here for the API call
+        let messages = messages.clone();
+        let tools = tools.clone();
         
         Box::pin(async move {
             let result = llmgraph::generate::generate::generate_full_response(
-                base_url_final,
-                api_key_final,
-                model_final,
+                base_url,
+                api_key,
+                model_for_api,
                 temperature,
-                messages_final,
-                tools_final,
+                messages,
+                tools,
             )
             .await;
             
@@ -421,7 +422,7 @@ pub async fn generate_with_retry(
                     let response_json = serde_json::json!({
                         "success": true,
                         "response": response,
-                        "model": model,
+                        "model": model_for_response,
                         "temperature": temperature
                     });
                     Ok::<serde_json::Value, NeonmachinesError>(response_json)
