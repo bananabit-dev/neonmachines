@@ -3,14 +3,16 @@ mod agents;
 mod nm_config;
 mod runner;
 mod commands;
-mod create_ui;
-mod workflow_ui;
 mod app;
 mod tools;
 mod shared_history;
+mod cli;
+mod poml;
+mod rate_limiter;
 
 use color_eyre::Result;
-use crossterm::{event, terminal};
+use crossterm::event;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -18,17 +20,123 @@ use app::App;
 use nm_config::{load_all_nm, preset_workflows};
 use runner::{run_workflow, AppCommand, AppEvent};
 use tui::{restore_terminal, setup_terminal};
+use cli::{AppMode, Cli};
+use poml::handle_poml_execution;
+
+impl Default for Cli {
+    fn default() -> Self {
+        Cli {
+            command: None,
+            tui: true,
+            web: false,
+            config: false,
+            port: 3000,
+            host: "127.0.0.1".to_string(),
+            config_file: None,
+            log_level: "info".to_string(),
+            verbose: false,
+            theme: "default".to_string(),
+            avatar: None,
+            rate_limit: 60,
+            enable_rate_limit: false,
+            poml_file: None,
+            working_dir: None,
+            log_file: None,
+            experimental: false,
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
+    // Parse command line arguments manually for now
+    let args: Vec<String> = std::env::args().collect();
+    let mut cli = Cli::default();
+    
+    // Handle simple flags
+    cli.web = args.contains(&"--web".to_string());
+    cli.config = args.contains(&"--config".to_string());
+    cli.verbose = args.contains(&"--verbose".to_string());
+    cli.experimental = args.contains(&"--experimental".to_string());
+    
+    // Handle values
+    for (i, arg) in args.iter().enumerate() {
+        match arg.as_str() {
+            "--port" if i + 1 < args.len() => {
+                if let Ok(port) = args[i + 1].parse() {
+                    cli.port = port;
+                }
+            }
+            "--host" if i + 1 < args.len() => {
+                cli.host = args[i + 1].clone();
+            }
+            "--log-level" if i + 1 < args.len() => {
+                cli.log_level = args[i + 1].clone();
+            }
+            "--theme" if i + 1 < args.len() => {
+                cli.theme = args[i + 1].clone();
+            }
+            "--rate-limit" if i + 1 < args.len() => {
+                if let Ok(limit) = args[i + 1].parse() {
+                    cli.rate_limit = limit;
+                }
+            }
+            "--poml-file" if i + 1 < args.len() => {
+                cli.poml_file = Some(PathBuf::from(&args[i + 1]));
+            }
+            "--working-dir" if i + 1 < args.len() => {
+                cli.working_dir = Some(PathBuf::from(&args[i + 1]));
+            }
+            "--log-file" if i + 1 < args.len() => {
+                cli.log_file = Some(PathBuf::from(&args[i + 1]));
+            }
+            _ => {}
+        }
+    }
+
+    // Handle POML file execution if specified
+    if let Some(poml_file) = &cli.poml_file {
+        let (tx_evt, _) = mpsc::unbounded_channel::<AppEvent>();
+        let working_dir = cli.working_dir.clone();
+        
+        match handle_poml_execution(poml_file, working_dir, tx_evt).await {
+            Ok(_) => println!("POML execution completed successfully"),
+            Err(e) => eprintln!("POML execution failed: {}", e),
+        }
+        return Ok(());
+    }
+
+    // Initialize rate limiter if enabled
+    if cli.enable_rate_limit {
+        println!("Rate limiting enabled with limit: {} requests/minute", cli.rate_limit);
+        // Initialize rate limiter here
+    }
+
+    // Determine mode based on CLI arguments
+    let mode = cli.get_mode();
+    
+    match mode {
+        AppMode::Web => run_web(cli).await,
+        AppMode::Config => run_config(cli).await,
+        AppMode::Command => run_command(cli).await,
+        AppMode::Tui => run_tui(cli).await,
+    }
+}
+
+async fn run_tui(cli: Cli) -> Result<()> {
     let mut terminal = setup_terminal()?;
 
     let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel::<AppCommand>();
     let (tx_evt, rx_evt) = mpsc::unbounded_channel::<AppEvent>();
 
-    // ✅ Load all workflows instead of just one
+    // Set up logging
+    if let Some(log_file) = &cli.log_file {
+        println!("Logging to file: {}", log_file.display());
+    }
+
+    // Load all workflows
     let loaded_workflows = load_all_nm().unwrap_or_else(|_| preset_workflows());
     let mut workflows = std::collections::HashMap::new();
     for wf in &loaded_workflows {
@@ -70,4 +178,119 @@ async fn main() -> Result<()> {
 
     restore_terminal(terminal)?;
     Ok(())
+}
+
+async fn run_web(cli: Cli) -> Result<()> {
+    println!("Web interface not yet implemented. Starting TUI instead.");
+    println!("Would run on http://{}:{}/ with theme: {}", cli.get_host(), cli.get_port(), cli.theme);
+    run_tui(cli).await
+}
+
+async fn run_config(cli: Cli) -> Result<()> {
+    println!("Configuration mode not yet implemented.");
+    println!("Config file: {:?}", cli.config_file);
+    println!("Log level: {}", cli.log_level);
+    if cli.verbose {
+        println!("Verbose logging enabled");
+    }
+    Ok(())
+}
+
+async fn run_command(cli: Cli) -> Result<()> {
+    match &cli.command {
+        Some(cli::Commands::Poml { file, working_dir, output, provider, temperature, max_tokens, log_level, save }) => {
+            // Check if python and poml are available
+            if !is_poml_available().await {
+                eprintln!("Error: POML CLI is not available. Please install it with:");
+                eprintln!("  pip install poml");
+                return Ok(());
+            }
+            
+            println!("Executing POML file: {}", file.display());
+            
+            if let Some(working_dir) = working_dir {
+                println!("Working directory: {}", working_dir.display());
+            }
+            
+            if let Some(output) = output {
+                println!("Output file: {}", output.display());
+            }
+            
+            if let Some(provider) = provider {
+                println!("Provider: {}", provider);
+            }
+            
+            println!("Temperature: {}", temperature);
+            println!("Max tokens: {}", max_tokens);
+            println!("Log level: {}", log_level);
+            println!("Save results: {}", save);
+            
+            // Execute the POML file using python -m poml -f {file}
+            let mut command = tokio::process::Command::new("python");
+            command.arg("-m").arg("poml").arg("-f");
+            command.arg(file.display().to_string());
+            
+            if let Some(working_dir) = working_dir {
+                command.current_dir(working_dir);
+            }
+            
+            let command_output = command.output().await?;
+            
+            if command_output.status.success() {
+                println!("POML execution successful:");
+                println!("{}", String::from_utf8_lossy(&command_output.stdout));
+            } else {
+                eprintln!("POML execution failed:");
+                eprintln!("{}", String::from_utf8_lossy(&command_output.stderr));
+            }
+            
+            if *save {
+                // Save results to output file if specified
+                let results_content = String::from_utf8_lossy(&command_output.stdout);
+                if let Some(output_path) = output {
+                    tokio::fs::write(&output_path, results_content.as_ref()).await?;
+                    println!("Results saved to: {}", output_path.display());
+                }
+            }
+        }
+        Some(cli::Commands::Config { list_themes, list_providers, show, edit: _, validate: _, theme: _, provider: _ }) => {
+            if *list_themes {
+                println!("Available themes: default, dark, light");
+            }
+            if *list_providers {
+                println!("Available providers: openai, anthropic, local");
+            }
+            if *show {
+                println!("Configuration not yet implemented.");
+            }
+        }
+        _ => {
+            println!("Command not yet implemented.");
+        }
+    }
+    Ok(())
+}
+
+async fn is_poml_available() -> bool {
+    // Check if python is available
+    match tokio::process::Command::new("python")
+        .arg("--version")
+        .output()
+        .await
+    {
+        Ok(_) => {
+            // Check if poml module is available
+            match tokio::process::Command::new("python")
+                .arg("-m")
+                .arg("poml")
+                .arg("--help")
+                .output()
+                .await
+            {
+                Ok(poml_output) => poml_output.status.success(),
+                Err(_) => false,
+            }
+        }
+        Err(_) => false,
+    }
 }

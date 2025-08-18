@@ -35,6 +35,7 @@ impl Default for AgentRow {
 pub struct WorkflowConfig {
     pub name: String,
     pub rows: Vec<AgentRow>,
+    #[allow(dead_code)]  // Currently unused but may be needed for future features
     pub active_agent_index: usize,
     pub model: String,
     pub temperature: f32,
@@ -90,7 +91,10 @@ pub fn save_all_nm(cfgs: &[WorkflowConfig]) -> std::io::Result<()> {
 }
 
 /// Load a single workflow (legacy compatibility)
+#[allow(dead_code)]
 pub fn load_nm_or_create() -> WorkflowConfig {
+    #[cfg(debug_assertions)]
+    eprintln!("Warning: load_nm_or_create() is deprecated, use load_all_nm() instead");
     match load_nm() {
         Ok(cfg) => cfg,
         Err(_) => {
@@ -120,6 +124,7 @@ fn load_all_nm_inner() -> std::io::Result<Vec<WorkflowConfig>> {
 }
 
 /// Load a single workflow (legacy compatibility)
+#[allow(dead_code)]
 fn load_nm() -> std::io::Result<WorkflowConfig> {
     let mut s = String::new();
     File::open(CONFIG_FILE)?.read_to_string(&mut s)?;
@@ -158,7 +163,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
     let mut maximum_traversals = 20;
     let mut working_dir = ".".to_string(); // ✅ default
 
-    let mut push_current =
+    let push_current =
         |rows: &mut Vec<AgentRow>, cur: &mut Option<AgentRow>| {
             if let Some(a) = cur.take() {
                 rows.push(a);

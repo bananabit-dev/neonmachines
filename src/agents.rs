@@ -100,7 +100,7 @@ fn run_poml_file_with_vars(
     file: &str,
     vars: &HashMap<String, String>,
     user_input: &str,
-    last_output: &str,
+    _last_output: &str,
     log_tx: &UnboundedSender<AppEvent>,
 ) -> String {
     let path = format!("./prompts/{}", file);
@@ -237,7 +237,7 @@ impl Agent for PomlAgent {
             let parts: Vec<&str> = entry.splitn(3, ':').collect();
             if parts.len() == 3 {
                 let file = parts[2].trim();
-                let mut vars = HashMap::new();
+                let vars = HashMap::new();
                 if let Some(user_input) = &self.latest_user_input {
                     let _ = inject_let_variables_in_file(
                         file,
@@ -313,7 +313,7 @@ impl Agent for PomlAgent {
                     let parts: Vec<&str> = entry.splitn(3, ':').collect();
                     if parts.len() == 3 {
                         let file = parts[2].trim();
-                        let mut vars = HashMap::new();
+                        let vars = HashMap::new();
                         let _ = inject_let_variables_in_file(
                             file,
                             &vars,

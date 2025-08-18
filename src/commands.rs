@@ -216,7 +216,7 @@ pub fn handle_command(
                     });
                 }
             } else {
-                if let Some(cfg) = workflows.get(active_workflow) {
+                if let Some(_cfg) = workflows.get(active_workflow) {
                     let current = if let Some(idx) = *selected_agent {
                         format!("Currently selected: Agent {}", idx)
                     } else {

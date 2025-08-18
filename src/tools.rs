@@ -28,7 +28,7 @@ fn resolve_path(working_dir: &str, path: &str) -> PathBuf {
 
 /// Built-in + extended tools
 pub fn builtin_tools_with_history(
-    shared_history: SharedHistory,
+    _shared_history: SharedHistory,
     tx: UnboundedSender<AppEvent>,
     working_dir: String,
 ) -> Vec<(Tool, Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync>)> {

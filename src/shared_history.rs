@@ -19,6 +19,7 @@ impl SharedHistory {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_last(&self, n: usize) -> Vec<Message> {
         if let Ok(history) = self.inner.lock() {
             let len = history.len();
@@ -28,6 +29,7 @@ impl SharedHistory {
         }
     }
 
+    #[allow(dead_code)]
     pub fn search(&self, query: &str) -> Vec<Message> {
         if let Ok(history) = self.inner.lock() {
             history
