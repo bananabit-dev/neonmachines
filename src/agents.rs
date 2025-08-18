@@ -25,8 +25,8 @@ pub struct ValidationResult {
 fn inject_let_variables_in_file(
     file: &str,
     vars: &HashMap<String, String>,
-    original_input: &str,
-    latest_output: &str,
+    nminput: Option<&str>,
+    nmoutput: Option<&str>,
     log_tx: &UnboundedSender<AppEvent>,
 ) -> std::io::Result<()> {
     let path = format!("./prompts/{}", file);
@@ -44,13 +44,13 @@ fn inject_let_variables_in_file(
     )
     .unwrap();
 
-    // ✅ Always overwrite nminput and nmoutput
     let mut replacements: HashMap<String, String> = vars.clone();
-    replacements.insert("nminput".to_string(), original_input.to_string());
-    replacements.insert("nmoutput".to_string(), latest_output.to_string());
 
-    for value in replacements.values_mut() {
-        *value = value.replace('\n', " ").replace('\r', " ");
+    if let Some(inp) = nminput {
+        replacements.insert("nminput".to_string(), inp.replace('\n', " ").replace('\r', " "));
+    }
+    if let Some(out) = nmoutput {
+        replacements.insert("nmoutput".to_string(), out.replace('\n', " ").replace('\r', " "));
     }
 
     for (key, value) in &replacements {
@@ -71,16 +71,18 @@ fn inject_let_variables_in_file(
     }
 
     // Ensure nminput and nmoutput exist
-    if !processed.contains("name=\"nminput\"") {
+    if nminput.is_some() && !processed.contains("name=\"nminput\"") {
         processed = format!(
             r#"<let name="nminput">{}</let>\n{}"#,
-            replacements["nminput"], processed
+            replacements.get("nminput").unwrap_or(&"".to_string()),
+            processed
         );
     }
-    if !processed.contains("name=\"nmoutput\"") {
+    if nmoutput.is_some() && !processed.contains("name=\"nmoutput\"") {
         processed = format!(
             r#"<let name="nmoutput">{}</let>\n{}"#,
-            replacements["nmoutput"], processed
+            replacements.get("nmoutput").unwrap_or(&"".to_string()),
+            processed
         );
     }
 
@@ -97,8 +99,8 @@ fn inject_let_variables_in_file(
 fn run_poml_file_with_vars(
     file: &str,
     vars: &HashMap<String, String>,
-    original_input: &str,
-    latest_output: &str,
+    user_input: &str,
+    last_output: &str,
     log_tx: &UnboundedSender<AppEvent>,
 ) -> String {
     let path = format!("./prompts/{}", file);
@@ -108,13 +110,8 @@ fn run_poml_file_with_vars(
         path
     )));
 
-    if let Err(e) = inject_let_variables_in_file(
-        file,
-        vars,
-        original_input,
-        latest_output,
-        log_tx,
-    ) {
+    // ✅ Only update nminput here (user input)
+    if let Err(e) = inject_let_variables_in_file(file, vars, Some(user_input), None, log_tx) {
         return format!("Failed to update {}: {}", file, e);
     }
 
@@ -149,7 +146,7 @@ pub struct PomlAgent {
     pub iteration_delay_ms: u64,
     pub tx: UnboundedSender<AppEvent>,
     pub original_prompt: Option<String>,
-    pub latest_user_input: Option<String>,   // ✅ track latest user input
+    pub latest_user_input: Option<String>, // ✅ track latest user input
     pub shared_history: SharedHistory,
     pub history: Vec<Message>,
 }
@@ -261,56 +258,24 @@ impl Agent for PomlAgent {
                 break;
             }
 
-            let mut retries = 0;
-            let max_retries = 5;
-            let mut resp_ok = None;
+            let resp = generate_full_response(
+                base_url.clone(),
+                api_key.clone(),
+                self.model.clone(),
+                self.temperature,
+                messages.clone(),
+                Some(tools.clone()),
+            )
+            .await;
 
-            while retries <= max_retries {
-                let resp = generate_full_response(
-                    base_url.clone(),
-                    api_key.clone(),
-                    self.model.clone(),
-                    self.temperature,
-                    messages.clone(),
-                    Some(tools.clone()),
-                )
-                .await;
-
-                match resp {
-                    Ok(llm) => {
-                        resp_ok = Some(llm);
-                        break;
-                    }
-                    Err(e) => {
-                        let err_str = e.to_string();
-                        let _ = self.tx.send(AppEvent::Log(format!(
-                            "[{}] LLM call failed (attempt {}): {}",
-                            self.name, retries + 1, err_str
-                        )));
-
-                        if err_str.contains("429") || err_str.contains("rate") {
-                            let backoff = 2u64.pow(retries as u32) * 500;
-                            let _ = self.tx.send(AppEvent::Log(format!(
-                                "[{}] Rate limited, retrying in {}ms",
-                                self.name, backoff
-                            )));
-                            sleep(Duration::from_millis(backoff)).await;
-                            retries += 1;
-                            continue;
-                        } else {
-                            final_output = format!("Error: {}", err_str);
-                            return (final_output, None);
-                        }
-                    }
+            let llm = match resp {
+                Ok(r) => r,
+                Err(e) => {
+                    final_output = format!("Error: {}", e);
+                    return (final_output, None);
                 }
-            }
+            };
 
-            if resp_ok.is_none() {
-                final_output = "Error: max retries reached".to_string();
-                break;
-            }
-
-            let llm = resp_ok.unwrap();
             let choice = &llm.choices[0];
             let msg = &choice.message;
 
@@ -325,72 +290,28 @@ impl Agent for PomlAgent {
                 self.history.push(assistant_msg.clone());
                 self.shared_history.append(assistant_msg.clone());
 
-                // ✅ Update poml with correct nminput (user) and nmoutput (assistant)
+                // ✅ Only update nmoutput here
                 for entry in &self.files {
                     let parts: Vec<&str> = entry.splitn(3, ':').collect();
                     if parts.len() == 3 {
                         let file = parts[2].trim();
                         let mut vars = HashMap::new();
-                        if let Some(user_input) = &self.latest_user_input {
-                            vars.insert("nminput".to_string(), user_input.clone());
-                        }
                         let _ = inject_let_variables_in_file(
                             file,
                             &vars,
-                            self.latest_user_input.as_deref().unwrap_or(""),
-                            &final_output,
+                            None,
+                            Some(&final_output),
                             &self.tx,
                         );
                     }
                 }
             }
 
-            if let Some(tool_calls) = &msg.tool_calls {
-                for tc in tool_calls {
-                    let result = tool_registry
-                        .execute_tool(&tc.function.name, &tc.function.arguments);
-
-                    let content = match result {
-                        Ok(v) => serde_json::to_string(&v).unwrap(),
-                        Err(e) => format!("Error: {}", e),
-                    };
-
-                    let tool_msg = Message {
-                        role: "tool".into(),
-                        content: Some(content.clone()),
-                        tool_calls: None,
-                    };
-                    messages.push(tool_msg.clone());
-                    self.history.push(tool_msg.clone());
-                    self.shared_history.append(tool_msg.clone());
-                }
-                sleep(Duration::from_millis(self.iteration_delay_ms)).await;
-                continue;
-            }
-
-            sleep(Duration::from_millis(self.iteration_delay_ms)).await;
+            break;
         }
 
-        // ✅ Ensure nmoutput is updated at the end too
         if final_output.is_empty() {
             final_output = "No output produced".to_string();
-        }
-        for entry in &self.files {
-            let parts: Vec<&str> = entry.splitn(3, ':').collect();
-            if parts.len() == 3 {
-                let file = parts[2].trim();
-                let mut vars = HashMap::new();
-                if let Some(user_input) = &self.latest_user_input {
-                    vars.insert("nminput".to_string(), user_input.clone());
-                }
-                let _ = inject_let_variables_in_file(
-                    file,
-                    &vars,
-                    self.latest_user_input.as_deref().unwrap_or(""),
-                    &final_output,
-                    &self.tx,
-                );
-            }
         }
 
         (final_output, None)
