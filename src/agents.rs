@@ -232,6 +232,24 @@ impl Agent for PomlAgent {
         // ✅ Track latest user input
         self.latest_user_input = Some(input.to_string());
 
+        // ✅ Update nminput in all poml files (user input only)
+        for entry in &self.files {
+            let parts: Vec<&str> = entry.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                let file = parts[2].trim();
+                let mut vars = HashMap::new();
+                if let Some(user_input) = &self.latest_user_input {
+                    let _ = inject_let_variables_in_file(
+                        file,
+                        &vars,
+                        Some(user_input), // ✅ only nminput
+                        None,
+                        &self.tx,
+                    );
+                }
+            }
+        }
+
         // ✅ Rehydrate messages from local history
         let mut messages = vec![self.load_system_message(input, "no nmoutput")];
         for msg in &self.history {
@@ -290,7 +308,7 @@ impl Agent for PomlAgent {
                 self.history.push(assistant_msg.clone());
                 self.shared_history.append(assistant_msg.clone());
 
-                // ✅ Only update nmoutput here
+                // ✅ Update nmoutput in all poml files (assistant output only)
                 for entry in &self.files {
                     let parts: Vec<&str> = entry.splitn(3, ':').collect();
                     if parts.len() == 3 {
@@ -300,11 +318,35 @@ impl Agent for PomlAgent {
                             file,
                             &vars,
                             None,
-                            Some(&final_output),
+                            Some(&final_output), // ✅ only nmoutput
                             &self.tx,
                         );
                     }
                 }
+            }
+
+            // ✅ Handle tool calls if any
+            if let Some(tool_calls) = &msg.tool_calls {
+                for tc in tool_calls {
+                    let result = tool_registry
+                        .execute_tool(&tc.function.name, &tc.function.arguments);
+
+                    let content = match result {
+                        Ok(v) => serde_json::to_string(&v).unwrap(),
+                        Err(e) => format!("Error: {}", e),
+                    };
+
+                    let tool_msg = Message {
+                        role: "tool".into(),
+                        content: Some(content.clone()),
+                        tool_calls: None,
+                    };
+                    messages.push(tool_msg.clone());
+                    self.history.push(tool_msg.clone());
+                    self.shared_history.append(tool_msg.clone());
+                }
+                sleep(Duration::from_millis(self.iteration_delay_ms)).await;
+                continue;
             }
 
             break;

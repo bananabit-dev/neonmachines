@@ -42,7 +42,7 @@ pub struct App {
     pub create_focus: usize,
     pub scroll_offset: usize,
     pub auto_scroll: bool,
-
+    
     pub selected_agent: Option<usize>,
 }
 
@@ -143,10 +143,7 @@ impl App {
                             KeyCode::Esc => {
                                 if self.mode == Mode::InteractiveChat {
                                     self.mode = Mode::Chat;
-                                    self.add_message(
-                                        "system",
-                                        "Exited interactive chat mode".to_string(),
-                                    );
+                                    self.add_message("system", "Exited interactive chat mode".to_string());
                                 }
                             }
                             _ => {}
@@ -174,7 +171,7 @@ impl App {
                             KeyCode::Backspace => {
                                 self.backspace();
                             }
-                            KeyCode::Enter => {
+                     KeyCode::Enter => {
                                 if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
                                     match self.create_focus {
                                         0 => cfg.name = self.input.clone(),
@@ -255,8 +252,7 @@ impl App {
                             }
                             KeyCode::Esc => {
                                 // ✅ Save all workflows when exiting create mode
-                                let all: Vec<WorkflowConfig> =
-                                    self.workflows.values().cloned().collect();
+                                let all: Vec<WorkflowConfig> = self.workflows.values().cloned().collect();
                                 let _ = save_all_nm(&all);
                                 self.mode = Mode::Chat;
                             }
@@ -296,7 +292,7 @@ impl App {
                 }
             }
             Event::Paste(s) => {
-                // ✅ Multi-line paste support: append entire string
+                // ✅ Multi-line paste support: keep entire paste in input buffer
                 self.input.push_str(&s);
                 self.cursor_g = self.input.graphemes(true).count();
             }
@@ -362,7 +358,10 @@ impl App {
 
     fn submit(&mut self) {
         let line = self.input.clone();
+
+        // ✅ Treat the entire input (even multi-line) as one message
         self.add_message("you", line.clone());
+
         if line.starts_with('/') {
             handle_command(
                 &line,
@@ -387,12 +386,11 @@ impl App {
                     start_agent: self.selected_agent,
                 });
             } else {
-                self.add_message(
-                    "system",
-                    "No active workflow selected. Use /workflow to select one.".to_string(),
-                );
+                self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
             }
         }
+
+        // ✅ Clear input after sending
         self.input.clear();
         self.cursor_g = 0;
     }
