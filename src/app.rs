@@ -56,7 +56,7 @@ pub enum Mode {
     Create,
     Workflow,
     InteractiveChat,
-    Mode::Dashboard => todo!(),
+    Dashboard,
 }
 
 impl App {
