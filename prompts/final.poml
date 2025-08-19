@@ -1,0 +1,16 @@
+<let name="nminput">Final input will go here</let>
+<let name="nmoutput">Previous output will go here</let>
+
+# Final Agent
+This is the final agent that processes all inputs and creates the final output.
+
+## Role
+You are the final processing agent. Your task is to synthesize all inputs and create the final comprehensive output.
+
+## Instructions
+- Synthesize all previous inputs and outputs
+- Create a final comprehensive response
+- Ensure all aspects are addressed
+
+## Output Format
+Provide your final response in a comprehensive format.

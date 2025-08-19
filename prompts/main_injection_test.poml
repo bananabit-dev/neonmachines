@@ -1,0 +1,27 @@
+<let name="input1">original input text</let>
+<let name="output2">previous output text</let>
+<let name="mixed"></let>
+
+# Main Agent with Injection
+This is the main agent that demonstrates <let> variable injection.
+
+## Role
+You are the main processing agent. Your task is to analyze the input and create a comprehensive response using injected variables.
+
+## Instructions
+- Analyze the input carefully
+- Create detailed output
+- Use the injected variables from previous outputs
+- Mix multiple variables together
+
+## Available Variables
+- input1: Contains the original user input
+- output2: Contains output from a previous agent
+- mixed: Can be used to mix multiple variables
+
+## Example Output Format
+The processed input: {input1}
+Previous output: {output2}
+Mixed content: {mixed}
+
+Provide your response based on the injected variables above.

@@ -39,8 +39,9 @@ fn inject_let_variables_in_file(
     let content = std::fs::read_to_string(&path)?;
     let mut processed = content.clone();
 
+    // Regex to find <let> tags and extract name and content
     let re = Regex::new(
-        r#"<let\s+name="([^"]+)"[^>]*>(.*?)</let>|<let\s+name="([^"]+)"[^>]*/>"#,
+        r#"<let\s+name="([^"]+)"[^>]*>(.*?)</let>"#,
     )
     .unwrap();
 
@@ -53,24 +54,35 @@ fn inject_let_variables_in_file(
         replacements.insert("nmoutput".to_string(), out.replace('\n', " ").replace('\r', " "));
     }
 
-    for (key, value) in &replacements {
-        processed = re
-            .replace_all(&processed, |caps: &regex::Captures| {
-                let name = caps
-                    .get(1)
-                    .map(|m| m.as_str())
-                    .or_else(|| caps.get(3).map(|m| m.as_str()))
-                    .unwrap_or("");
+    // Process each <let> tag and replace content if we have a replacement
+    processed = re.replace_all(&processed, |caps: &regex::Captures| {
+        let name = caps.get(1).unwrap().as_str();
+        let existing_content = caps.get(2).unwrap().as_str();
+        
+        // Check if we have a replacement for this variable
+        if let Some(new_content) = replacements.get(name) {
+            // Replace the content inside the <let> tag
+            format!(r#"<let name="{}">{}</let>"#, name, new_content)
+        } else {
+            // Keep the original content
+            caps[0].to_string()
+        }
+    }).to_string();
 
-                if name == key {
-                    return format!(r#"<let name="{}">{}</let>"#, name, value);
-                }
-                caps[0].to_string()
-            })
-            .to_string();
-    }
+    // Handle self-closing <let> tags (empty content)
+    let empty_re = Regex::new(r#"<let\s+name="([^"]+)"[^>]*/>"#).unwrap();
+    processed = empty_re.replace_all(&processed, |caps: &regex::Captures| {
+        let name = caps.get(1).unwrap().as_str();
+        
+        if let Some(new_content) = replacements.get(name) {
+            format!(r#"<let name="{}">{}</let>"#, name, new_content)
+        } else {
+            // Keep empty if no replacement
+            format!(r#"<let name="{}"></let>"#, name)
+        }
+    }).to_string();
 
-    // Ensure nminput and nmoutput exist
+    // Ensure nminput and nmoutput exist if provided
     if nminput.is_some() && !processed.contains("name=\"nminput\"") {
         processed = format!(
             r#"<let name="nminput">{}</let>\n{}"#,
@@ -233,17 +245,30 @@ impl Agent for PomlAgent {
         // ✅ Track latest user input
         self.latest_user_input = Some(input.to_string());
 
-        // ✅ Update nminput in all poml files (user input only)
+        // ✅ Process injections before running the agent
+        let processed_input = crate::nm_config::process_injections(
+            input,
+            &crate::nm_config::AgentRow::default(), // This should be the actual agent row
+            &self.shared_history,
+            &self.tx,
+        );
+
+        let _ = self.tx.send(crate::runner::AppEvent::Log(format!(
+            "[Injection] Processed input: '{}'",
+            processed_input
+        )));
+
+        // ✅ Update nminput in all poml files (processed input)
         for entry in &self.files {
             let parts: Vec<&str> = entry.splitn(3, ':').collect();
             if parts.len() == 3 {
                 let file = parts[2].trim();
                 let vars = HashMap::new();
                 if let Some(user_input) = &self.latest_user_input {
-                    let _ = inject_let_variables_in_file(
+                    let _ = crate::agents::inject_let_variables_in_file(
                         file,
                         &vars,
-                        Some(user_input), // ✅ only nminput
+                        Some(&processed_input), // ✅ use processed input
                         None,
                         &self.tx,
                     );

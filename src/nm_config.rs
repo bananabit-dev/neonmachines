@@ -16,6 +16,8 @@ pub struct AgentRow {
     pub on_success: Option<i32>,
     pub on_failure: Option<i32>,
     pub iteration_delay_ms: u64,   // ✅ configurable delay
+    pub input_injections: Vec<String>,  // ✅ input injection patterns (e.g., "input1:output2")
+    pub output_injections: Vec<String>, // ✅ output injection patterns
 }
 
 impl Default for AgentRow {
@@ -27,6 +29,8 @@ impl Default for AgentRow {
             on_success: None,
             on_failure: None,
             iteration_delay_ms: 200,
+            input_injections: Vec::new(),
+            output_injections: Vec::new(),
         }
     }
 }
@@ -83,6 +87,13 @@ pub fn save_all_nm(cfgs: &[WorkflowConfig]) -> std::io::Result<()> {
             out.push_str(&format!("iteration_delay_ms:{}\n", row.iteration_delay_ms));
             out.push_str(&format!("on_success:{}\n", row.on_success.unwrap_or(-1)));
             out.push_str(&format!("on_failure:{}\n", row.on_failure.unwrap_or(-1)));
+            // Save injection patterns
+            if !row.input_injections.is_empty() {
+                out.push_str(&format!("input_injections:\"{}\"\n", row.input_injections.join(";")));
+            }
+            if !row.output_injections.is_empty() {
+                out.push_str(&format!("output_injections:\"{}\"\n", row.output_injections.join(";")));
+            }
         }
     }
     let mut f = File::create(CONFIG_FILE)?;
@@ -214,6 +225,8 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
                     on_success: None,
                     on_failure: None,
                     iteration_delay_ms: 200,
+                    input_injections: Vec::new(),
+                    output_injections: Vec::new(),
                 });
             }
             continue;
@@ -253,6 +266,20 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
             }
             continue;
         }
+        if let Some(rest) = line.strip_prefix("input_injections:") {
+            let val = rest.trim().trim_matches('"').to_string();
+            if let Some(a) = &mut cur_agent {
+                a.input_injections = val.split(';').map(|s| s.trim().to_string()).collect();
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("output_injections:") {
+            let val = rest.trim().trim_matches('"').to_string();
+            if let Some(a) = &mut cur_agent {
+                a.output_injections = val.split(';').map(|s| s.trim().to_string()).collect();
+            }
+            continue;
+        }
     }
     push_current(&mut rows, &mut cur_agent);
 
@@ -273,4 +300,76 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
 
 pub fn preset_workflows() -> Vec<WorkflowConfig> {
     vec![WorkflowConfig::default()]
+}
+
+/// Process input/output injections for a given agent
+pub fn process_injections(
+    input: &str,
+    agent: &AgentRow,
+    shared_history: &crate::shared_history::SharedHistory,
+    log_tx: &tokio::sync::mpsc::UnboundedSender<crate::runner::AppEvent>,
+) -> String {
+    let mut processed_input = input.to_string();
+    
+    // Process input injections (e.g., "input1:output2")
+    for injection in &agent.input_injections {
+        if let Some((source_input, target_output)) = injection.split_once(':') {
+            let source_input = source_input.trim();
+            let target_output = target_output.trim();
+            
+            // Find the source input from shared history
+            if let Some(source_content) = find_input_from_history(source_input, shared_history) {
+                // Inject the source content into the target output position
+                processed_input = inject_into_input(&processed_input, target_output, &source_content);
+                
+                let _ = log_tx.send(crate::runner::AppEvent::Log(format!(
+                    "[Injection] Injected '{}' from '{}' into input",
+                    source_content, source_input
+                )));
+            }
+        }
+    }
+    
+    processed_input
+}
+
+/// Find content from shared history by input name
+fn find_input_from_history(input_name: &str, shared_history: &crate::shared_history::SharedHistory) -> Option<String> {
+    // Use the public API to get the full history
+    let history_messages = shared_history.get_last(100); // Get last 100 messages
+    
+    // Look for messages that contain the input name
+    for msg in &history_messages {
+        if let Some(content) = &msg.content {
+            if content.contains(&format!("input: {}", input_name)) || 
+               content.contains(&format!("user: {}", input_name)) {
+                // Extract the actual content after the pattern
+                if let Some(pos) = content.find(input_name) {
+                    let remaining = &content[pos + input_name.len()..];
+                    if remaining.starts_with(": ") {
+                        return Some(remaining[2..].to_string());
+                    } else if remaining.starts_with(' ') {
+                        return Some(remaining[1..].to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+/// Inject content into input at specified position
+fn inject_into_input(input: &str, position: &str, content: &str) -> String {
+    if position == "start" {
+        format!("{} {}", content, input)
+    } else if position == "end" {
+        format!("{} {}", input, content)
+    } else if let Some(pos) = input.find(position) {
+        let before = &input[..pos];
+        let after = &input[pos..];
+        format!("{} {} {}", before, content, after)
+    } else {
+        input.to_string()
+    }
 }

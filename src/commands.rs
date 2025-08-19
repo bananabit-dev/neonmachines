@@ -271,11 +271,47 @@ pub fn handle_command(
                 });
             }
         }
+        "/help" => {
+            help_command(messages);
+        }
         _ => {
             messages.push(ChatMessage {
                 from: "system",
-                text: "Unknown command".into(),
+                text: "Unknown command. Type /help for available commands.".into(),
             });
         }
     }
+}
+
+fn help_command(messages: &mut Vec<ChatMessage>) {
+    let help_text = r#"
+Available commands:
+
+/cwd [path]          - Show or set working directory
+/run [workflow|all] [prompt] - Run a workflow or all workflows
+/save                - Save all workflows to config.nm
+/create [name]       - Create or edit a workflow
+/workflow            - Enter workflow selection mode
+/chat                - Enter interactive chat mode
+/agent [number|none|list] - Select agent for routing
+/history [agent|all] - Show execution history
+/help                - Show this help message
+
+Navigation:
+Enter - Submit message
+Shift+Enter - Insert newline
+Ctrl+C or Ctrl+D - Quit
+Ctrl+L - Clear screen
+Tab - Command completion
+
+Examples:
+/run myworkflow "Process this data"
+/agent 2 - Select agent 2 for routing
+/agent none - Use default routing
+/create newworkflow - Create new workflow named 'newworkflow'
+"#;
+    messages.push(ChatMessage {
+        from: "system",
+        text: help_text.to_string(),
+    });
 }

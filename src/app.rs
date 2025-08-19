@@ -461,10 +461,20 @@ impl App {
         let lines: Vec<&str> = self.input.split('\n').collect();
         let current_line = self.get_current_line_index() as u16;
         let current_col = self.get_current_column_in_line() as u16;
-        let cx = input_area.x + 2 + current_col; // +2 for padding
-        let cy = input_area.y + 1 + current_line; // +1 for padding
+        let cx = input_area.x + 2 + current_col; // +2 for padding (block borders)
+        let cy = input_area.y + 1 + current_line; // +1 for padding (block title)
         
-        f.set_cursor_position(Position::new(cx, cy));
+        // Fix cursor position - don't go past the end of the input
+        if self.cursor_g == self.input.graphemes(true).count() && self.input.is_empty() {
+            // When input is empty, position at start
+            f.set_cursor_position(Position::new(cx, cy));
+        } else if self.cursor_g == self.input.graphemes(true).count() {
+            // When cursor is at end, position it properly (not one space too far)
+            f.set_cursor_position(Position::new(cx + 1, cy));
+        } else {
+            // Normal cursor position
+            f.set_cursor_position(Position::new(cx, cy));
+        }
     }
 
     pub async fn poll_async(&mut self) {

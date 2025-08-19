@@ -1,0 +1,32 @@
+workflow:injection_test
+model:z-ai/glm-4.5
+temperature:0.7
+maximum_traversals:20
+working_dir:.
+
+agent_1: Agent
+files:"role:main:main.poml"
+maximum_iterations:3
+iteration_delay_ms:200
+on_success:-1
+on_failure:-1
+input_injections:"input1:output2;input2:start"
+output_injections:"output1:end"
+
+agent_2: Agent
+files:"role:secondary:secondary.poml"
+maximum_iterations:3
+iteration_delay_ms:200
+on_success:-1
+on_failure:-1
+input_injections:"output1:start"
+output_injections:""
+
+agent_3: Agent
+files:"role:final:final.poml"
+maximum_iterations:3
+iteration_delay_ms:200
+on_success:-1
+on_failure:-1
+input_injections:""
+output_injections:""

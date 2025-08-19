@@ -1,0 +1,19 @@
+workflow:injection_let_test
+model:z-ai/glm-4.5
+temperature:0.7
+maximum_traversals:20
+working_dir:.
+
+agent_1: Agent
+files:"role:main:main_injection_test.poml"
+maximum_iterations:3
+iteration_delay_ms:200
+on_success:-1
+on_failure:-1
+
+agent_2: Agent
+files:"role:secondary:main_injection_test.poml"
+maximum_iterations:3
+iteration_delay_ms:200
+on_success:-1
+on_failure:-1
