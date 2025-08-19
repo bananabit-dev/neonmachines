@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_segmentation::UnicodeSegmentation;
 use std::collections::VecDeque;
-use crossterm::event::{Event, KeyEvent, KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyEvent, KeyCode, KeyModifiers, MouseEvent};
 
 pub struct ChatMessage {
     pub from: &'static str,
@@ -135,20 +135,16 @@ impl App {
                 self.backspace();
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Left, .. }) => {
-                self.left();
+                self.move_cursor_left();
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Right, .. }) => {
-                self.right();
+                self.move_cursor_right();
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
-                if self.scroll_offset + 1 < self.messages.len() {
-                    self.scroll_offset += 1;
-                }
+                self.move_cursor_up();
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
-                if self.scroll_offset > 0 {
-                    self.scroll_offset -= 1;
-                }
+                self.move_cursor_down();
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Esc, .. }) => {
                 if self.mode == Mode::Chat {
@@ -170,6 +166,10 @@ impl App {
                         }
                     }
                 }
+            }
+            crossterm::event::Event::Paste(text) => {
+                // Handle paste events - treat pasted content as a single input
+                self.insert_paste_content(&text);
             }
             _ => {}
         }
@@ -213,6 +213,125 @@ impl App {
         if self.cursor_g < n {
             self.cursor_g += 1;
         }
+    }
+
+    /// Enhanced cursor movement for multi-line input
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor_g > 0 {
+            self.cursor_g -= 1;
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let n = self.input.graphemes(true).count();
+        if self.cursor_g < n {
+            self.cursor_g += 1;
+        }
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        if lines.len() <= 1 {
+            // If only one line, move to beginning
+            self.cursor_g = 0;
+            return;
+        }
+
+        let current_line_index = self.get_current_line_index();
+        if current_line_index > 0 {
+            let target_line = &lines[current_line_index - 1];
+            let current_col_in_line = self.get_current_column_in_line();
+            
+            // Move to same column in previous line, or end of line if column is beyond
+            let new_cursor_pos = self.calculate_position_for_line_and_col(current_line_index - 1, current_col_in_line);
+            self.cursor_g = new_cursor_pos;
+        }
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        if lines.len() <= 1 {
+            // If only one line, move to end
+            self.cursor_g = self.input.graphemes(true).count();
+            return;
+        }
+
+        let current_line_index = self.get_current_line_index();
+        if current_line_index < lines.len() - 1 {
+            let target_line = &lines[current_line_index + 1];
+            let current_col_in_line = self.get_current_column_in_line();
+            
+            // Move to same column in next line, or end of line if column is beyond
+            let new_cursor_pos = self.calculate_position_for_line_and_col(current_line_index + 1, current_col_in_line);
+            self.cursor_g = new_cursor_pos;
+        } else {
+            // Move to end of last line
+            self.cursor_g = self.input.graphemes(true).count();
+        }
+    }
+
+    /// Handle paste content properly for multi-line text
+    pub fn insert_paste_content(&mut self, content: &str) {
+        // Normalize line endings to \n for consistent handling
+        let normalized_content = content.replace("\r\n", "\n").replace('\r', "\n");
+        
+        // Find the position to insert
+        let bi = byte_idx_for_g(&self.input, self.cursor_g);
+        
+        // Insert the content
+        self.input.insert_str(bi, &normalized_content);
+        
+        // Move cursor to end of pasted content
+        let pasted_graphemes = UnicodeSegmentation::graphemes(normalized_content.as_str(), true).count();
+        self.cursor_g += pasted_graphemes;
+    }
+
+    /// Helper method to get current line index (0-based)
+    fn get_current_line_index(&self) -> usize {
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        let mut current_pos = 0;
+        
+        for (i, line) in lines.iter().enumerate() {
+            let line_end = current_pos + line.graphemes(true).count() + (if i < lines.len() - 1 { 1 } else { 0 });
+            if self.cursor_g < line_end {
+                return i;
+            }
+            current_pos = line_end;
+        }
+        
+        lines.len().saturating_sub(1)
+    }
+
+    /// Helper method to get current column within current line
+    fn get_current_column_in_line(&self) -> usize {
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        let current_line_index = self.get_current_line_index();
+        let current_line = lines[current_line_index];
+        
+        let mut line_pos = 0;
+        for (i, _) in current_line.grapheme_indices(true) {
+            if self.cursor_g == line_pos + (if current_line_index < lines.len() - 1 { 1 } else { 0 }) + i {
+                return i;
+            }
+        }
+        
+        current_line.graphemes(true).count()
+    }
+
+    /// Helper method to calculate cursor position from line and column
+    fn calculate_position_for_line_and_col(&self, line_index: usize, col: usize) -> usize {
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        let mut position = 0;
+        
+        for (i, line) in lines.iter().enumerate() {
+            if i == line_index {
+                // Return min of requested column or line length
+                return position + col.min(line.graphemes(true).count());
+            }
+            position += line.graphemes(true).count() + 1; // +1 for newline
+        }
+        
+        self.input.graphemes(true).count() // Fallback to end
     }
 
     pub fn submit(&mut self) {
@@ -338,12 +457,12 @@ impl App {
             .wrap(Wrap { trim: false });
         f.render_widget(input, input_area);
         
-        // Enhanced cursor positioning with visual feedback
+        // Enhanced cursor positioning with visual feedback using helper methods
         let lines: Vec<&str> = self.input.split('\n').collect();
-        let current_line = lines.len().saturating_sub(1);
-        let current_col = lines.last().map(|l| l.graphemes(true).count()).unwrap_or(0);
-        let cx = input_area.x + 2 + current_col as u16; // +2 for padding
-        let cy = input_area.y + 1 + current_line as u16; // +1 for padding
+        let current_line = self.get_current_line_index() as u16;
+        let current_col = self.get_current_column_in_line() as u16;
+        let cx = input_area.x + 2 + current_col; // +2 for padding
+        let cy = input_area.y + 1 + current_line; // +1 for padding
         
         f.set_cursor_position(Position::new(cx, cy));
     }
