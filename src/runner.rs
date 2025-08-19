@@ -1,61 +1,38 @@
-use crate::agents::{ChainedAgent, PomlAgent, PomlValidatorAgent};
-use crate::nm_config::{AgentType, WorkflowConfig};
 use crate::shared_history::SharedHistory;
 use crate::tools::builtin_tools_with_history;
 use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
 use crate::metrics::metrics_collector::MetricsCollector;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::time::sleep;
 
-#[derive(Debug)]
 pub enum AppCommand {
     RunWorkflow {
         workflow_name: String,
         prompt: String,
-        cfg: WorkflowConfig,
-        start_agent: Option<usize>,
-    },
-    ShowHistory {
-        workflow_name: String,
-        agent_index: Option<usize>,
-        cfg: WorkflowConfig,
+        cfg: crate::nm_config::WorkflowConfig,
+        start_agent: Option<i32>,
     },
 }
 
-#[derive(Debug)]
 pub enum AppEvent {
-    RunStart(String),
     Log(String),
+    RunStart(String),
     RunResult(String),
     RunEnd(String),
+    Error(String),
 }
 
-pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, mut metrics: Option<MetricsCollector>) {
+pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, metrics: Option<Arc<Mutex<MetricsCollector>>>) {
     match cmd {
-        AppCommand::RunWorkflow {
-            workflow_name,
-            prompt,
-            cfg,
-            start_agent,
-        } => {
+        AppCommand::RunWorkflow { workflow_name, prompt, cfg, start_agent } => {
             let _ = log_tx.send(AppEvent::RunStart(workflow_name.clone()));
             let _ = log_tx.send(AppEvent::Log(format!(
-                "Starting workflow: {}",
-                workflow_name
+                "Starting workflow '{}' with prompt: {}", 
+                workflow_name, 
+                prompt
             )));
-            let _ = log_tx.send(AppEvent::Log(format!(
-                "Model: {}, Temperature: {}",
-                cfg.model, cfg.temperature
-            )));
-            let _ = log_tx.send(AppEvent::Log(format!(
-                "Max traversals: {}",
-                cfg.maximum_traversals
-            )));
-            let _ = log_tx.send(AppEvent::Log(format!(
-                "Working dir: {}",
-                cfg.working_dir
-            )));
-
-            let mut graph = Graph::new();
 
             // ✅ Create shared history
             let shared_history = SharedHistory::new();
@@ -64,6 +41,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, mu
             ));
 
             // ✅ Register tools with shared history + tx + working_dir
+            let mut graph = Graph::new();
             for (tool, func) in builtin_tools_with_history(
                 shared_history.clone(),
                 log_tx.clone(),
@@ -73,10 +51,6 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, mu
             }
 
             // Build graph nodes
-            let _ = log_tx.send(AppEvent::Log(format!(
-                "Building graph with {} agents",
-                cfg.rows.len()
-            )));
             for (i, row) in cfg.rows.iter().enumerate() {
                 let next_id = if i + 1 < cfg.rows.len() {
                     Some((i + 1) as i32)
@@ -84,281 +58,121 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, mu
                     None
                 };
 
-                let _ = log_tx.send(AppEvent::Log(format!(
-                    "Creating agent {} ({:?}): files={}, max_iterations={}",
-                    i + 1,
-                    row.agent_type,
-                    row.files,
-                    row.max_iterations
-                )));
+                let files: Vec<String> = row
+                    .files
+                    .split(';')
+                    .map(|s| s.trim().to_string())
+                    .collect();
 
-                let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
-                    AgentType::Agent | AgentType::ParallelAgent => {
-                        let files: Vec<String> =
-                            row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        Box::new(PomlAgent::new(
-                            &format!("Agent{}", i + 1),
-                            files,
-                            cfg.model.clone(),
-                            cfg.temperature,
-                            row.max_iterations,
-                            log_tx.clone(),
-                            shared_history.clone(),
-                        ))
-                    }
-                    AgentType::ValidatorAgent => {
-                        let files: Vec<String> =
-                            row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        let poml_validator = PomlAgent::new(
+                let agent: Box<dyn llmgraph::models::graph::Agent> = if row.agent_type == crate::nm_config::AgentType::Validator {
+                    Box::new(crate::agents::PomlValidatorAgent::new(
+                        crate::agents::PomlAgent::new(
                             &format!("ValidatorAgent{}", i + 1),
-                            files,
+                            files.clone(),
                             cfg.model.clone(),
                             cfg.temperature,
-                            row.max_iterations,
-                            log_tx.clone(),
-                            shared_history.clone(),
-                        );
-                        let success_route = row.on_success.unwrap_or(next_id.unwrap_or(-1));
-                        let failure_route =
-                            row.on_failure
-                                .unwrap_or(if i > 0 { (i - 1) as i32 } else { -1 });
-
-                        let _ = log_tx.send(AppEvent::Log(format!(
-                            "ValidatorAgent{}: success_route={}, failure_route={}",
-                            i + 1,
-                            if success_route == -1 {
-                                "END".to_string()
-                            } else {
-                                (success_route + 1).to_string()
-                            },
-                            if failure_route == -1 {
-                                "END".to_string()
-                            } else {
-                                (failure_route + 1).to_string()
-                            }
-                        )));
-
-                        Box::new(PomlValidatorAgent::new(
-                            poml_validator,
-                            success_route,
-                            failure_route,
-                        ))
-                    }
+                        ),
+                        row.on_success.unwrap_or(-1),
+                        row.on_failure.unwrap_or(-1),
+                    ))
+                } else {
+                    Box::new(crate::agents::PomlAgent::new(
+                        &format!("Agent{}", i + 1),
+                        files.clone(),
+                        cfg.model.clone(),
+                        cfg.temperature,
+                    ))
                 };
 
                 // ✅ Pass shared_history into ChainedAgent
-                let chained = ChainedAgent::new(
+                let chained = crate::agents::ChainedAgent::new(
+                    i,
                     agent,
+                    row.max_iterations,
+                    row.iteration_delay_ms,
                     next_id,
-                    i as i32,
                     log_tx.clone(),
                     shared_history.clone(),
                 );
+
                 graph.add_node(i as i32, Box::new(chained));
             }
 
             // Execute workflow with metrics tracking
             let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
-            let mut traversals = 0;
             let mut output = String::new();
             let mut current_input = prompt.clone();
             let mut current_node = start_agent.unwrap_or(0) as i32;
+            let mut traversals = 0;
+            let max_traversals = cfg.maximum_traversals;
 
             // Start metrics tracking for workflow
-            if let Some(ref mut metrics_collector) = metrics {
-                let request_id = metrics_collector.start_request("workflow_execution".to_string()).await;
-                // Track the request ID for cleanup later
-                tokio::spawn(async move {
-                    // In a real implementation, we would finish this request when workflow completes
-                    // For now, we'll let it timeout or finish based on workflow completion
-                });
-            }
+            let metrics_collector = metrics.unwrap_or_else(|| Arc::new(Mutex::new(MetricsCollector::new())));
+            let request_id = metrics_collector.lock().unwrap().start_request("workflow_execution".to_string()).await;
+            // Track the request ID for cleanup later
 
-            loop {
-                if traversals >= cfg.maximum_traversals {
-                    let msg = format!(
-                        "[Traversal limit reached: {} traversals]",
-                        cfg.maximum_traversals
-                    );
-                    let _ = log_tx.send(AppEvent::Log(msg.clone()));
-                    output.push_str(&format!("\n{}", msg));
-                    break;
-                }
-                traversals += 1;
+            let msg = format!(
+                "Traversal {}: Starting at node {} with input: {}",
+                traversals + 1,
+                current_node,
+                current_input
+            );
+            let _ = log_tx.send(AppEvent::Log(msg.clone()));
+            output.push_str(&format!("\n{}", msg));
 
-                // Track each traversal step with metrics
-                let step_start = std::time::Instant::now();
-                let mut step_output = graph.run(current_node, &current_input).await;
-                let step_duration = step_start.elapsed();
+            // Track each traversal step with metrics
+            let step_start = std::time::Instant::now();
+            let mut step_output = graph.run(current_node, &current_input).await;
+            let step_duration = step_start.elapsed();
 
-                // Record metrics for this traversal step
-                if let Some(ref mut metrics_collector) = metrics {
-                    // For now, we'll record this as a successful step
-                    // In a real implementation, we'd need to determine success/failure
-                    let _ = metrics_collector.finish_request(format!("step_{}", traversals), true).await;
-                }
+            // Record metrics for this traversal step
+            // For now, we'll record this as a successful step
+            // In a real implementation, we'd need to determine success/failure
+            let _ = metrics_collector.lock().unwrap().finish_request(format!("step_{}", traversals), true).await;
 
-                // Try to detect explicit routing marker
-                let mut next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__=") {
-                    let route_str = &step_output[route_idx + 10..];
-                    let route = route_str.trim().parse::<i32>().ok();
-                    step_output.truncate(route_idx); // remove marker
-                    route
+            // Try to detect explicit routing marker
+            let mut next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__=") {
+                let route_str = &step_output[route_idx + 11..];
+                let route = route_str.trim().parse::<i32>().ok();
+                step_output.truncate(route_idx); // remove marker
+                route
+            } else {
+                None
+            };
+
+            // ✅ If no explicit marker, fall back to config.nm routing
+            if next_node.is_none() {
+                next_node = if !step_output.starts_with("Error:") {
+                    // Preserve the original prompt and only pass the LLM output to the next agent
+                    current_input = step_output.trim().to_string();
+                    Some(current_node + 1)
                 } else {
-                    None
+                    Some(current_node) // retry same node on error
                 };
-
-                // ✅ If no explicit marker, fall back to config.nm routing
-                if next_node.is_none() {
-                    let row = &cfg.rows[current_node as usize];
-                    if !step_output.starts_with("Error:") {
-                        next_node = row.on_success;
-                    } else {
-                        next_node = row.on_failure;
-                    }
-                }
-
-                let clean_output = step_output.trim().to_string();
-                output.push_str(&clean_output);
-
-                // Preserve the original prompt and only pass the LLM output to the next agent
-                current_input = clean_output;
-
-                match next_node {
-                    Some(-1) => {
-                        let _ = log_tx.send(AppEvent::Log(format!(
-                            "Traversal {}: Workflow completed (reached END node)",
-                            traversals
-                        )));
-                        break;
-                    }
-                    Some(next) if next >= 0 => {
-                        let _ = log_tx.send(AppEvent::Log(format!(
-                            "Traversal {}: Transitioning from node {} to node {}",
-                            traversals,
-                            current_node + 1,
-                            next + 1
-                        )));
-                        current_node = next;
-                    }
-                    _ => {
-                        let _ = log_tx.send(AppEvent::Log(format!(
-                            "Traversal {}: No valid routing from node {}, ending workflow",
-                            traversals,
-                            current_node + 1
-                        )));
-                        break;
-                    }
-                }
             }
 
             // Final metrics update and alert generation
-            if let Some(ref mut metrics_collector) = metrics {
-                let final_metrics = metrics_collector.get_metrics().await;
-                let alerts = metrics_collector.get_alerts().await;
-                
-                // Log any alerts
-                for alert in alerts {
-                    let _ = log_tx.send(AppEvent::Log(format!(
-                        "[PERFORMANCE ALERT] {}: {}",
-                        alert.level, alert.message
-                    )));
-                }
+            let final_metrics = metrics_collector.lock().unwrap().get_metrics().await;
+            let alerts = metrics_collector.lock().unwrap().get_alerts().await;
 
-                // Log final performance summary
+            // Log any alerts
+            for alert in alerts {
                 let _ = log_tx.send(AppEvent::Log(format!(
-                    "[PERFORMANCE SUMMARY] {}",
-                    metrics_collector.get_request_summary().await
+                    "[ALERT][{}] {}",
+                    alert.level,
+                    alert.message
                 )));
             }
 
+            // Log final performance summary
             let _ = log_tx.send(AppEvent::RunResult(format!(
-                "Workflow completed after {} traversal(s)\nFinal output:\n{}",
-                traversals, output
+                "Workflow completed. Metrics: {} requests, {:.2}% success rate, avg {:.2}ms response time",
+                final_metrics.request_count,
+                final_metrics.get_success_rate() * 100.0,
+                final_metrics.average_response_time.num_milliseconds()
             )));
+
             let _ = log_tx.send(AppEvent::RunEnd(workflow_name));
-        }
-
-        AppCommand::ShowHistory {
-            workflow_name,
-            agent_index,
-            cfg,
-        } => {
-            let _ = log_tx.send(AppEvent::Log(format!(
-                "Showing history for workflow '{}'",
-                workflow_name
-            )));
-
-            let mut graph = Graph::new();
-            let shared_history = SharedHistory::new();
-
-            // ✅ Register tools here too with working_dir
-            for (tool, func) in builtin_tools_with_history(
-                shared_history.clone(),
-                log_tx.clone(),
-                cfg.working_dir.clone(),
-            ) {
-                graph.register_tool(tool, func);
-            }
-
-            for (i, row) in cfg.rows.iter().enumerate() {
-                let next_id = if i + 1 < cfg.rows.len() {
-                    Some((i + 1) as i32)
-                } else {
-                    None
-                };
-                let agent: Box<dyn llmgraph::Agent> = match row.agent_type {
-                    AgentType::Agent | AgentType::ParallelAgent => {
-                        let files: Vec<String> =
-                            row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        Box::new(PomlAgent::new(
-                            &format!("Agent{}", i + 1),
-                            files,
-                            cfg.model.clone(),
-                            cfg.temperature,
-                            row.max_iterations,
-                            log_tx.clone(),
-                            shared_history.clone(),
-                        ))
-                    }
-                    AgentType::ValidatorAgent => {
-                        let files: Vec<String> =
-                            row.files.split(';').map(|s| s.trim().to_string()).collect();
-                        let poml_validator = PomlAgent::new(
-                            &format!("ValidatorAgent{}", i + 1),
-                            files,
-                            cfg.model.clone(),
-                            cfg.temperature,
-                            row.max_iterations,
-                            log_tx.clone(),
-                            shared_history.clone(),
-                        );
-                        Box::new(PomlValidatorAgent::new(
-                            poml_validator,
-                            row.on_success.unwrap_or(-1),
-                            row.on_failure.unwrap_or(-1),
-                        ))
-                    }
-                };
-                let chained = ChainedAgent::new(
-                    agent,
-                    next_id,
-                    i as i32,
-                    log_tx.clone(),
-                    shared_history.clone(),
-                );
-                graph.add_node(i as i32, Box::new(chained));
-            }
-
-            if let Some(idx) = agent_index {
-                let dump = graph.run(idx as i32, "__SHOW_HISTORY__").await;
-                let _ = log_tx.send(AppEvent::Log(dump));
-            } else {
-                for i in 0..cfg.rows.len() {
-                    let dump = graph.run(i as i32, "__SHOW_HISTORY__").await;
-                    let _ = log_tx.send(AppEvent::Log(dump));
-                }
-            }
         }
     }
 }

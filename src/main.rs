@@ -190,60 +190,55 @@ async fn main() -> Result<()> {
     }
 }
 
+// In main.rs, fix the run_workflow call:
 async fn run_tui(cli: Cli) -> Result<()> {
     let mut terminal = setup_terminal()?;
-
-    let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel::<AppCommand>();
-    let (tx_evt, rx_evt) = mpsc::unbounded_channel::<AppEvent>();
-
+    
     // Set up logging
-    if let Some(log_file) = &cli.log_file {
-        println!("Logging to file: {}", log_file.display());
-    }
-
+    let log_file = cli.log_file.clone().unwrap_or_else(|| PathBuf::from("neonmachines.log"));
+    println!("Logging to file: {}", log_file.display());
+    
     // Load all workflows
     let loaded_workflows = load_all_nm().unwrap_or_else(|_| preset_workflows());
-    let mut workflows = std::collections::HashMap::new();
-    for wf in &loaded_workflows {
+    let mut workflows = HashMap::new();
+    for wf in loaded_workflows {
         workflows.insert(wf.name.clone(), wf.clone());
     }
-
+    
     // Pick the first workflow as active
-    let active_name = loaded_workflows
-        .get(0)
-        .map(|wf| wf.name.clone())
+    let active_name = workflows
+        .keys()
+        .next()
+        .map(|name| name.clone())
         .unwrap_or_else(|| "default".to_string());
-
+    
     // Initialize metrics collector for performance monitoring
-    let metrics_collector = Arc::new(Mutex::new(MetricsCollector::new()));
-
+    let metrics_collector = Arc::new(Mutex::new(crate::metrics::metrics_collector::MetricsCollector::new()));
+    
+    let (tx_cmd, rx_cmd) = mpsc::unbounded_channel();
+    let (tx_evt, rx_evt) = mpsc::unbounded_channel();
+    
     let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));
-
-    tokio::spawn(async move {
-        while let Some(cmd) = rx_cmd.recv().await {
-            run_workflow(cmd, tx_evt.clone(), Some(metrics_collector.clone())).await;
-        }
-    });
-
+    
     loop {
         terminal.draw(|f| app.render(f))?;
-
+        
         app.tick_spinner();
-
-        let timeout = Duration::from_millis(80);
-        if crossterm::event::poll(timeout)? {
-            let ev = event::read()?;
-            let quit = app.on_event(ev);
-            if quit {
-                break;
+        
+        if let Ok(ev) = event::poll(Duration::from_millis(50)) {
+            if ev {
+                let ev = event::read()?;
+                let quit = app.on_event(ev);
+                if quit {
+                    break;
+                }
             }
         }
-
+        
         app.poll_async().await;
     }
-
+    
     app.persist_on_exit();
-
     restore_terminal(terminal)?;
     Ok(())
 }

@@ -1,58 +1,57 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc, TimeZone, Duration};
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Utc, Duration};
 use std::fs;
 use std::path::PathBuf;
-use crate::metrics::{PerformanceMetrics, RequestTiming, PerformanceAlert};
+use uuid;
+use futures;
 
 /// Time range for historical data queries
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TimeRange {
     LastHour,
-    Last6Hours,
-    Last24Hours,
-    Last7Days,
-    Last30Days,
+    LastDay,
+    LastWeek,
     All,
 }
 
 /// Export format for historical data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ExportFormat {
-    Json,
-    Csv,
+    JSON,
+    CSV,
 }
 
 /// Historical performance data entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HistoricalEntry {
     pub timestamp: DateTime<Utc>,
-    pub metrics: PerformanceMetrics,
     pub operation: String,
     pub success: bool,
+    pub metrics: PerformanceMetrics,
 }
 
 /// Summary statistics for historical data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HistoricalSummary {
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
     pub total_requests: u64,
-    pub average_response_time_ms: f64,
+    pub success_count: u64,
+    pub error_count: u64,
     pub success_rate_percent: f64,
-    pub total_duration_ms: u64,
+    pub average_response_time_ms: f64,
     pub min_response_time_ms: u64,
     pub max_response_time_ms: u64,
     pub request_rate_per_second: f64,
-    pub time_range_start: DateTime<Utc>,
-    pub time_range_end: DateTime<Utc>,
 }
 
 /// Historical performance data storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct HistoricalPerformanceData {
     pub entries: Vec<HistoricalEntry>,
-    pub max_entries: usize,
+    max_entries: usize,
 }
 
 impl HistoricalPerformanceData {
@@ -66,13 +65,13 @@ impl HistoricalPerformanceData {
     pub async fn add_metrics_snapshot(&mut self, metrics: PerformanceMetrics) {
         let entry = HistoricalEntry {
             timestamp: Utc::now(),
-            metrics,
             operation: "workflow_execution".to_string(),
             success: true, // Can be enhanced to track per-operation success
+            metrics,
         };
-
+        
         self.entries.push(entry);
-
+        
         // Remove oldest entries if we exceed the maximum
         if self.entries.len() > self.max_entries {
             self.entries.remove(0);
@@ -83,10 +82,8 @@ impl HistoricalPerformanceData {
         let now = Utc::now();
         let start_time = match time_range {
             TimeRange::LastHour => now - Duration::hours(1),
-            TimeRange::Last6Hours => now - Duration::hours(6),
-            TimeRange::Last24Hours => now - Duration::hours(24),
-            TimeRange::Last7Days => now - Duration::days(7),
-            TimeRange::Last30Days => now - Duration::days(30),
+            TimeRange::LastDay => now - Duration::days(1),
+            TimeRange::LastWeek => now - Duration::weeks(1),
             TimeRange::All => self.entries.first().map(|e| e.timestamp).unwrap_or(now),
         };
 
@@ -97,25 +94,27 @@ impl HistoricalPerformanceData {
 
         if filtered_entries.is_empty() {
             return HistoricalSummary {
+                start_time,
+                end_time: now,
                 total_requests: 0,
-                average_response_time_ms: 0.0,
+                success_count: 0,
+                error_count: 0,
                 success_rate_percent: 0.0,
-                total_duration_ms: 0,
+                average_response_time_ms: 0.0,
                 min_response_time_ms: 0,
                 max_response_time_ms: 0,
                 request_rate_per_second: 0.0,
-                time_range_start: start_time,
-                time_range_end: now,
             };
         }
 
         let total_requests = filtered_entries.iter().map(|e| e.metrics.request_count).sum();
-        let total_duration_ms = filtered_entries.iter().map(|e| e.metrics.total_duration.as_millis() as u64).sum();
+        let total_duration_ms = filtered_entries.iter().map(|e| e.metrics.total_duration.num_milliseconds() as u64).sum();
         let success_count = filtered_entries.iter().map(|e| e.metrics.success_count).sum();
-        let average_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.as_millis() as f64).sum::<f64>() / filtered_entries.len() as f64;
+        let error_count = total_requests - success_count;
+        let average_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.num_milliseconds() as f64).sum::<f64>() / filtered_entries.len() as f64;
         
-        let min_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.as_millis()).min().unwrap_or(0);
-        let max_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.as_millis()).max().unwrap_or(0);
+        let min_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.num_milliseconds() as u64).min().unwrap_or(0);
+        let max_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.num_milliseconds() as u64).max().unwrap_or(0);
         
         let duration_seconds = (now - start_time).num_seconds() as f64;
         let request_rate_per_second = if duration_seconds > 0.0 {
@@ -123,40 +122,48 @@ impl HistoricalPerformanceData {
         } else {
             0.0
         };
+        
+        let success_rate_percent = if total_requests > 0 {
+            (success_count as f64 / total_requests as f64) * 100.0
+        } else {
+            0.0
+        };
 
         HistoricalSummary {
+            start_time,
+            end_time: now,
             total_requests,
+            success_count,
+            error_count,
+            success_rate_percent,
             average_response_time_ms,
-            success_rate_percent: if total_requests > 0 { (success_count as f64 / total_requests as f64) * 100.0 } else { 0.0 },
-            total_duration_ms,
-            min_response_time_ms,
-            max_response_time_ms,
+            min_response_time_ms: min_response_time_ms.try_into().unwrap(),
+            max_response_time_ms: max_response_time_ms.try_into().unwrap(),
             request_rate_per_second,
-            time_range_start: start_time,
-            time_range_end: now,
         }
     }
 
     pub async fn export(&self, format: ExportFormat) -> Result<String, String> {
         match format {
-            ExportFormat::Json => {
-                Ok(serde_json::to_string_pretty(self).map_err(|e| e.to_string())?)
+            ExportFormat::JSON => {
+                let data = serde_json::to_string(&*self);
+                data.map_err(|e| e.to_string())
             }
-            ExportFormat::Csv => {
+            ExportFormat::CSV => {
                 let mut csv = String::new();
                 csv.push_str("Timestamp,Operation,Success,RequestCount,SuccessCount,ErrorCount,AvgResponseTimeMs,TotalDurationMs,RPS,MemoryUsageMB,CPUUsagePercent\n");
                 
                 for entry in &self.entries {
                     csv.push_str(&format!(
-                        "{},{},{},{},{},{},{},{},{},{},{}\n",
-                        entry.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+                        "{},{},{},{},{},{},{:.2},{},{:.2},{:.2},{:.2}\n",
+                        entry.timestamp.to_rfc3339(),
                         entry.operation,
                         entry.success,
                         entry.metrics.request_count,
                         entry.metrics.success_count,
-                        entry.metrics.error_count,
-                        entry.metrics.average_response_time.as_millis(),
-                        entry.metrics.total_duration.as_millis(),
+                        entry.metrics.request_count - entry.metrics.success_count,
+                        entry.metrics.average_response_time.num_milliseconds(),
+                        entry.metrics.total_duration.num_milliseconds(),
                         entry.metrics.requests_per_second,
                         entry.metrics.memory_usage_mb,
                         entry.metrics.cpu_usage_percent
@@ -179,7 +186,190 @@ impl Default for HistoricalPerformanceData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct PerformanceMetrics {
+    pub request_count: u64,
+    pub success_count: u64,
+    pub total_duration: Duration,
+    pub average_response_time: Duration,
+    pub p95_response_time: Duration,
+    pub p99_response_time: Duration,
+    pub requests_per_second: f64,
+    pub memory_usage_mb: f64,
+    pub cpu_usage_percent: f64,
+    pub timestamp: DateTime<Utc>,
+}
+
+impl Default for PerformanceMetrics {
+    fn default() -> Self {
+        Self {
+            request_count: 0,
+            success_count: 0,
+            total_duration: Duration::milliseconds(0),
+            average_response_time: Duration::milliseconds(0),
+            p95_response_time: Duration::milliseconds(0),
+            p99_response_time: Duration::milliseconds(0),
+            requests_per_second: 0.0,
+            memory_usage_mb: 0.0,
+            cpu_usage_percent: 0.0,
+            timestamp: Utc::now(),
+        }
+    }
+}
+
+impl PerformanceMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_request(&mut self, duration: Duration, success: bool) {
+        self.request_count += 1;
+        if success {
+            self.success_count += 1;
+        }
+        self.total_duration = self.total_duration + duration;
+        self.update_derived_metrics();
+    }
+
+    pub fn update_derived_metrics(&mut self) {
+        if self.request_count > 0 {
+            let avg = (self.total_duration.num_milliseconds() / self.request_count as i64) as u64;
+            self.average_response_time = Duration::milliseconds(avg as i64);
+        }
+        
+        // Update requests per second
+        let elapsed_seconds = (Utc::now() - self.timestamp).num_seconds() as f64;
+        self.requests_per_second = if elapsed_seconds > 0.0 {
+            self.request_count as f64 / elapsed_seconds
+        } else {
+            0.0
+        };
+        
+        // Simulate memory and CPU usage (in a real implementation, you'd get actual system metrics)
+        self.memory_usage_mb = (self.requests_per_second * 0.1).min(1000.0);
+        self.cpu_usage_percent = (self.requests_per_second * 0.5).min(100.0);
+        
+        // Update percentiles (simplified)
+        self.p95_response_time = Duration::milliseconds((self.average_response_time.num_milliseconds() as f64 * 1.2) as i64);
+        self.p99_response_time = Duration::milliseconds((self.average_response_time.num_milliseconds() as f64 * 1.5) as i64);
+    }
+
+    pub fn get_success_rate(&self) -> f64 {
+        if self.request_count > 0 {
+            self.success_count as f64 / self.request_count as f64
+        } else {
+            0.0
+        }
+    }
+
+    pub fn get_error_rate(&self) -> f64 {
+        1.0 - self.get_success_rate()
+    }
+}
+
+pub struct RequestTiming {
+    pub operation: String,
+    pub start_time: std::time::Instant,
+    pub end_time: Option<std::time::Instant>,
+    pub duration: Option<std::time::Duration>,
+    pub success: bool,
+}
+
+impl RequestTiming {
+    pub fn new(operation: String) -> Self {
+        Self {
+            operation,
+            start_time: std::time::Instant::now(),
+            end_time: None,
+            duration: None,
+            success: false,
+        }
+    }
+
+    pub fn finish(&mut self, success: bool) {
+        self.end_time = Some(std::time::Instant::now());
+        self.duration = Some(self.end_time.unwrap().duration_since(self.start_time));
+        self.success = success;
+    }
+
+    pub fn get_duration(&self) -> std::time::Duration {
+        self.duration.unwrap_or_else(|| self.start_time.elapsed())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PerformanceAlert {
+    pub level: AlertLevel,
+    pub message: String,
+    pub timestamp: DateTime<Utc>,
+    pub metrics: PerformanceMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub enum AlertLevel {
+    Info,
+    Warning,
+    Critical,
+}
+
+impl AlertLevel {
+    pub fn from_error_rate(error_rate: f64) -> Self {
+        if error_rate > 0.1 {
+            AlertLevel::Critical
+        } else if error_rate > 0.05 {
+            AlertLevel::Warning
+        } else {
+            AlertLevel::Info
+        }
+    }
+}
+
+impl std::fmt::Display for AlertLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let level_str = match self {
+            AlertLevel::Info => "INFO",
+            AlertLevel::Warning => "WARNING",
+            AlertLevel::Critical => "CRITICAL",
+        };
+        write!(f, "{}", level_str)
+    }
+}
+
+pub fn generate_alerts(metrics: &PerformanceMetrics) -> Vec<PerformanceAlert> {
+    let mut alerts = Vec::new();
+    
+    let error_rate = metrics.get_error_rate();
+    
+    if error_rate > 0.05 { // 5% error rate threshold
+        alerts.push(PerformanceAlert {
+            level: AlertLevel::from_error_rate(error_rate),
+            message: format!("High error rate detected: {:.2}%", error_rate * 100.0),
+            timestamp: Utc::now(),
+            metrics: metrics.clone(),
+        });
+    }
+    
+    if metrics.requests_per_second > 100.0 {
+        alerts.push(PerformanceAlert {
+            level: AlertLevel::Warning,
+            message: format!("High request rate: {:.2} req/s", metrics.requests_per_second),
+            timestamp: Utc::now(),
+            metrics: metrics.clone(),
+        });
+    }
+    
+    if metrics.average_response_time.num_milliseconds() > 5000 {
+        alerts.push(PerformanceAlert {
+            level: AlertLevel::Critical,
+            message: format!("High response time: {:.2} ms", metrics.average_response_time.num_milliseconds()),
+            timestamp: Utc::now(),
+            metrics: metrics.clone(),
+        });
+    }
+    
+    alerts
+}
+
 pub struct MetricsCollector {
     metrics: Arc<RwLock<PerformanceMetrics>>,
     request_timings: Arc<RwLock<HashMap<String, RequestTiming>>>,
@@ -190,7 +380,7 @@ pub struct MetricsCollector {
 
 impl MetricsCollector {
     pub fn new() -> Self {
-        let data_dir = PathBuf::from("metrics_data");
+        let data_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(".neonmachines_data");
         fs::create_dir_all(&data_dir).unwrap_or_else(|_| {});
         
         Self {
@@ -218,15 +408,19 @@ impl MetricsCollector {
             timing.finish(success);
             
             let duration = timing.get_duration();
+            let duration_chrono = Duration::from_std(duration).unwrap_or(Duration::milliseconds(0));
+            
             let mut metrics = self.metrics.write().await;
-            metrics.record_request(duration, success);
+            metrics.record_request(duration_chrono, success);
             
             // Update historical data
             let mut historical = self.historical_data.write().await;
             historical.add_metrics_snapshot(metrics.clone()).await;
             
             // Generate alerts based on updated metrics
-            let alerts = crate::metrics::generate_alerts(&metrics);
+            let alerts = generate_alerts(&*metrics);
+            
+            // Update alerts
             let mut alerts_vec = self.alerts.write().await;
             alerts_vec.extend(alerts);
         }
@@ -256,18 +450,22 @@ impl MetricsCollector {
         let mut metrics = self.metrics.write().await;
         *metrics = PerformanceMetrics::new();
         
+        let mut timings = self.request_timings.write().await;
+        timings.clear();
+        
         let mut alerts = self.alerts.write().await;
         alerts.clear();
     }
 
-    pub async fn get_request_summary(&self) -> String {
+    pub fn get_request_summary_sync(&self) -> String {
+        // Using futures::executor::block_on for sync access
         let metrics = futures::executor::block_on(self.metrics.read());
         format!(
-            "Requests: {}, Success Rate: {:.1}%, Avg Time: {:.2}ms, Active: {}",
+            "Requests: {}, Success: {}, Error Rate: {:.2}%, Avg Time: {}ms",
             metrics.request_count,
-            metrics.get_success_rate() * 100.0,
-            metrics.average_response_time.as_millis(),
-            self.get_active_requests().await
+            metrics.success_count,
+            metrics.get_error_rate() * 100.0,
+            metrics.average_response_time.num_milliseconds()
         )
     }
 
@@ -293,7 +491,8 @@ impl MetricsCollector {
 
     pub async fn save_historical_data_to_file(&self) -> Result<(), String> {
         let historical = self.historical_data.read().await;
-        let data = serde_json::to_string(&*historical)?;
+        let data = serde_json::to_string(&*historical).map_err(|e| e.to_string())?;
+        
         let file_path = self.data_dir.join("historical_metrics.json");
         fs::write(&file_path, data).map_err(|e| e.to_string())
     }
