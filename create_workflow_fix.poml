@@ -1,0 +1,163 @@
+<poml>
+  <let name="code_improvements">
+    [
+      {
+        "issue": "Cursor positioning issue",
+        "file": "src/app.rs",
+        "fix": "Fixed cursor being 1 character to the right by removing +1 offset when cursor is at end",
+        "details": "Updated render method to properly position cursor without extra space"
+      },
+      {
+        "issue": "Create workflow mode not properly implemented",
+        "file": "src/app.rs", 
+        "fix": "Added comprehensive create mode handling with keyboard navigation",
+        "details": "Added handle_create_input, handle_create_submit, and navigation methods"
+      },
+      {
+        "issue": "Missing create mode UI rendering",
+        "file": "src/app.rs",
+        "fix": "Updated render method to handle Mode::Create and call render_create_mode",
+        "details": "Split render logic into chat mode and create mode branches"
+      },
+      {
+        "issue": "Missing imports for create mode",
+        "file": "src/app.rs",
+        "fix": "Added AgentType and Rect imports",
+        "details": "Added necessary imports for type annotations and UI rendering"
+      },
+      {
+        "issue": "No example POML workflow",
+        "fix": "Created example_workflow.poml with comprehensive workflow template",
+        "details": "Demonstrates POML syntax and workflow configuration structure"
+      }
+    ]
+  </let>
+
+  <let name="code_quality_improvements">
+    {
+      "cursor_handling": "Fixed multi-line cursor positioning with proper grapheme support",
+      "create_mode": "Implemented full create workflow mode with field navigation",
+      "error_handling": "Added proper error messages for workflow save failures",
+      "ui_rendering": "Split render logic by mode for better organization",
+      "keyboard_navigation": "Added comprehensive keyboard navigation for create mode"
+    }
+  </let>
+
+  <stylesheet>
+    {
+      "p": {
+        "syntax": "markdown"
+      },
+      "code": {
+        "syntax": "rust"
+      }
+    }
+  </stylesheet>
+
+  <p>
+    # POML Workflow for Code Fixing and Improvement
+    
+    This workflow demonstrates how to use POML to document and manage code improvements 
+    for the Neonmachines project, specifically addressing the create workflow issues.
+  </p>
+
+  <examples>
+    <example for="improvement in code_improvements" chat="false" caption="Fix: {{ improvement.issue }}">
+      <p>
+        **File:** `{{ improvement.file }}`  
+        **Issue:** {{ improvement.issue }}
+        
+        **Fix Applied:**
+        {{ improvement.fix }}
+        
+        **Details:**
+        {{ improvement.details }}
+      </p>
+    </example>
+  </examples>
+
+  <p>
+    ## Code Quality Improvements Summary
+    
+    The following improvements have been implemented to fix the create workflow functionality:
+  </p>
+
+  <list>
+    <item for="item in code_quality_improvements.keys()">
+      <strong>{{ item }}:</strong> {{ code_quality_improvements[item] }}
+    </item>
+  </list>
+
+  <p>
+    ## Technical Implementation Details
+    
+    ### 1. Cursor Positioning Fix
+    ```rust
+    // Before: cursor was positioned with +1 offset when at end
+    f.set_cursor_position(Position::new(cx + 1, cy));
+    
+    // After: proper cursor positioning without extra space
+    f.set_cursor_position(Position::new(cx, cy));
+    ```
+  </p>
+
+  <p>
+    ### 2. Create Mode Implementation
+    ```rust
+    pub fn handle_create_input(&mut self, c: char) {
+        match self.create_focus {
+            0 => self.create_input.insert(0, c), // Workflow Name
+            1 => self.create_input.insert(0, c), // Model
+            // ... other fields
+        }
+    }
+    ```
+  </p>
+
+  <p>
+    ### 3. UI Rendering Modes
+    ```rust
+    match self.mode {
+        Mode::Create => {
+            let area = f.area();
+            self.render_create_mode(f, area);
+        }
+        _ => {
+            // Normal chat mode layout
+            // ...
+        }
+    }
+    ```
+  </p>
+
+  <p>
+    ## Usage Instructions
+    
+    1. **Build and test the fixes:**
+       ```bash
+       cargo check
+       cargo run
+       ```
+    
+    2. **Test create workflow mode:**
+       - Launch Neonmachines TUI
+       - Type `/create test_workflow`
+       - Navigate through fields using arrow keys
+       - Edit values and press Enter to save
+    
+    3. **Test the example POML workflow:**
+       ```bash
+       neonmachines --poml-file example_workflow.poml
+       ```
+  </p>
+
+  <p>
+    ## Future Enhancements
+    
+    - Add validation for workflow inputs
+    - Implement create mode with better visual feedback
+    - Add POML template generation from existing workflows
+    - Improve error handling and user messages
+    - Add keyboard shortcuts for common create mode actions
+  </p>
+</poml>

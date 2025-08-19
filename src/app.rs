@@ -1,6 +1,7 @@
 use crate::commands::handle_command;
-use crate::nm_config::{WorkflowConfig, save_all_nm, AgentType};
+use crate::nm_config::{WorkflowConfig, save_all_nm, AgentType, AgentRow};
 use crate::runner::{AppCommand, AppEvent};
+use crate::create_ui;
 use ratatui::text::{Line, Span};
 use ratatui::style::{Style, Color, Modifier};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_segmentation::UnicodeSegmentation;
 use std::collections::VecDeque;
-use crossterm::event::{Event, KeyEvent, KeyCode, KeyModifiers, MouseEvent};
+use crossterm::event::Event;
 
 pub struct ChatMessage {
     pub from: &'static str,
@@ -120,12 +121,12 @@ impl App {
                 // Ctrl+D to quit (alternative to Ctrl+C)
                 return true;
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c'), .. }) => {
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
                 // Handle character input based on mode
                 match self.mode {
                     Mode::Create => {
                         // Handle create mode input
-                        if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+                        if let Some(_cfg) = self.workflows.get_mut(&self.active_workflow) {
                             self.handle_create_input(c);
                         }
                     }
@@ -607,15 +608,30 @@ impl App {
             _ => {
                 // Handle agent-specific fields
                 let agent_idx = (self.create_focus - 6) / 5;
-                if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
-                    if agent_idx < cfg.rows.len() {
-                        match (self.create_focus - 6) % 5 {
-                            0 => cfg.rows[agent_idx].agent_type = self.parse_agent_type(&self.create_input), // Agent Type
-                            1 => cfg.rows[agent_idx].files.push(c), // Files
-                            2 => cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3), // Max Iterations
-                            3 => cfg.rows[agent_idx].on_success = self.create_input.parse().ok(), // On Success
-                            4 => cfg.rows[agent_idx].on_failure = self.create_input.parse().ok(), // On Failure
-                            _ => {}
+                // Only proceed if we have a valid workflow and agent index
+                if !self.create_input.is_empty() {
+                    // Parse agent type first to avoid borrow checker issues
+                    let agent_type = if (self.create_focus - 6) % 5 == 0 {
+                        Some(self.parse_agent_type(&self.create_input))
+                    } else {
+                        None
+                    };
+                    
+                    if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+                        if agent_idx < cfg.rows.len() {
+                            match (self.create_focus - 6) % 5 {
+                                0 => {
+                                    // Use pre-parsed agent type
+                                    if let Some(at) = agent_type {
+                                        cfg.rows[agent_idx].agent_type = at;
+                                    }
+                                }
+                                1 => cfg.rows[agent_idx].files.push(c), // Files
+                                2 => cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3), // Max Iterations
+                                3 => cfg.rows[agent_idx].on_success = self.create_input.parse().ok(), // On Success
+                                4 => cfg.rows[agent_idx].on_failure = self.create_input.parse().ok(), // On Failure
+                                _ => {}
+                            }
                         }
                     }
                 }
@@ -649,25 +665,50 @@ impl App {
                 _ => {
                     // Handle agent-specific fields
                     let agent_idx = (self.create_focus - 6) / 5;
+                    let field_type = (self.create_focus - 6) % 5;
+                    
                     if agent_idx < cfg.rows.len() {
-                        match (self.create_focus - 6) % 5 {
-                            0 => cfg.rows[agent_idx].agent_type = self.parse_agent_type(&self.create_input),
-                            1 => cfg.rows[agent_idx].files = self.create_input.clone(),
-                            2 => cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3),
-                            3 => cfg.rows[agent_idx].on_success = self.create_input.parse().ok(),
-                            4 => cfg.rows[agent_idx].on_failure = self.create_input.parse().ok(),
+                        // Extract the input value before the match to avoid borrow checker issues
+                        let input_value = self.create_input.clone();
+                        
+                        // Parse agent type inline to avoid method calls that cause borrow conflicts
+                        let agent_type = if field_type == 0 {
+                            Some(match input_value.to_lowercase().as_str() {
+                                "validator" => AgentType::Validator,
+                                "parallel" | "parallelagent" => AgentType::ParallelAgent,
+                                _ => AgentType::Agent,
+                            })
+                        } else {
+                            None
+                        };
+                        
+                        // Update agent field
+                        match field_type {
+                            0 => {
+                                if let Some(at) = agent_type {
+                                    cfg.rows[agent_idx].agent_type = at;
+                                }
+                            }
+                            1 => cfg.rows[agent_idx].files = input_value,
+                            2 => cfg.rows[agent_idx].max_iterations = input_value.parse().unwrap_or(3),
+                            3 => cfg.rows[agent_idx].on_success = input_value.parse().ok(),
+                            4 => cfg.rows[agent_idx].on_failure = input_value.parse().ok(),
                             _ => {}
                         }
                     }
                 }
             }
             
-            // Save the workflow
+            // Save the workflow and collect message content before adding
+            let workflow_name = cfg.name.clone();
             let all: Vec<WorkflowConfig> = self.workflows.values().cloned().collect();
-            if let Err(e) = save_all_nm(&all) {
+            let save_result = save_all_nm(&all);
+            
+            // Handle save result after we're done with the mutable borrow
+            if let Err(e) = save_result {
                 self.add_message("error", format!("Failed to save workflow: {}", e));
             } else {
-                self.add_message("system", format!("Workflow '{}' updated successfully", cfg.name));
+                self.add_message("system", format!("Workflow '{}' updated successfully", workflow_name));
             }
         }
         
@@ -726,6 +767,16 @@ impl App {
             "validator" => AgentType::Validator,
             "parallel" | "parallelagent" => AgentType::ParallelAgent,
             _ => AgentType::Agent,
+        }
+    }
+
+    /// Set agent type for a specific agent index
+    fn set_agent_type(&mut self, agent_idx: usize, input: &str) {
+        let agent_type = self.parse_agent_type(input);
+        if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+            if agent_idx < cfg.rows.len() {
+                cfg.rows[agent_idx].agent_type = agent_type;
+            }
         }
     }
 
