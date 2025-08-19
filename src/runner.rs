@@ -4,8 +4,6 @@ use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
 use crate::metrics::metrics_collector::MetricsCollector;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::time::sleep;
 
 pub enum AppCommand {
     RunWorkflow {
@@ -120,8 +118,8 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
             let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
             let mut output = String::new();
             let mut current_input = prompt.clone();
-            let mut current_node = start_agent.unwrap_or(0) as i32;
-            let mut traversals = 0;
+            let current_node = start_agent.unwrap_or(0) as i32;
+            let traversals = 0;
             let max_traversals = cfg.maximum_traversals;
 
             // Start metrics tracking for workflow

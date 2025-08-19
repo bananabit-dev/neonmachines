@@ -1,5 +1,5 @@
 use crate::commands::handle_command;
-use crate::nm_config::{WorkflowConfig, load_all_nm, save_all_nm};
+use crate::nm_config::{WorkflowConfig, save_all_nm};
 use crate::runner::{AppCommand, AppEvent};
 use ratatui::text::{Line, Span};
 use ratatui::style::{Style, Color, Modifier};

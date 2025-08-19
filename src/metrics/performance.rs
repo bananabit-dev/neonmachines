@@ -1,12 +1,11 @@
 use ratatui::text::{Line, Span};
 use ratatui::style::{Style, Color, Modifier};
-use ratatui::widgets::{Block, Borders, Gauge as RatatuiGauge, Paragraph, Wrap, BarChart as RatatuiBarChart};
+use ratatui::widgets::{Block, Borders, Gauge as RatatuiGauge, Paragraph, BarChart as RatatuiBarChart};
 use ratatui::layout::{Rect, Alignment};
 use chrono::{DateTime, Utc, Duration};
-use std::time;
 
 // Re-export historical data types from metrics_collector
-pub use crate::metrics::metrics_collector::{HistoricalEntry, HistoricalSummary, TimeRange};
+pub use crate::metrics::metrics_collector::{HistoricalSummary, TimeRange};
 
 #[derive(Debug, Clone)]
 pub struct PerformanceMetrics {

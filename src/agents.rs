@@ -12,6 +12,9 @@ use std::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, Duration};
 use regex::Regex;
+use std::time::{Instant, Duration as StdDuration};
+use tracing::{info, warn, error, debug, trace};
+use uuid::Uuid;
 
 /// Validation result structure for explicit validation responses
 #[derive(Debug, Deserialize, Serialize)]

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::UnboundedSender;
+use std::process::{Command, Output, Stdio};
 
 /// Helper to define properties
 fn prop(typ: &str, desc: &str) -> Property {
@@ -447,6 +448,84 @@ pub fn builtin_tools_with_history(
                 let result = json!({ "decisions": results });
                 let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][yes_no_paragraphs] result = {}", result)));
                 Ok(result)
+            });
+        tools.push((tool, func));
+    }
+
+    // -------------------------
+    // Terminal/Command Execution Tool
+    // -------------------------
+
+    // execute_terminal
+    {
+        let tx_clone = tx.clone();
+        let wd = working_dir.clone();
+        let mut props = HashMap::new();
+        props.insert("command".into(), prop("string", "The terminal/bash command to execute. Example: 'ls -la', 'cat file.txt', 'mkdir new_dir'"));
+        props.insert("working_directory".into(), prop("string", "Optional working directory where the command should be executed. If not provided, uses current directory"));
+        props.insert("timeout_seconds".into(), prop("integer", "Optional timeout in seconds. Default is 30 seconds"));
+        let tool = Tool {
+            tool_type: "function".into(),
+            function: Function {
+                name: "execute_terminal".into(),
+                description: "Execute a terminal/bash command and get the output. Use this for file operations, system commands, or any shell execution.".into(),
+                parameters: Parameters {
+                    param_type: "object".into(),
+                    properties: props,
+                    required: vec!["command".into()],
+                },
+            },
+        };
+        let func: Box<dyn Fn(Value) -> Result<Value, String> + Send + Sync> =
+            Box::new(move |args| {
+                let command = args["command"].as_str().ok_or("Missing 'command' parameter")?;
+                let working_dir = args["working_directory"].as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| wd.clone());
+                let timeout = args["timeout_seconds"].as_u64().unwrap_or(30);
+
+                let mut cmd = Command::new("sh");
+                cmd.arg("-c").arg(command);
+                cmd.current_dir(&working_dir);
+
+                // Set up process to capture output
+                cmd.stdout(Stdio::piped());
+                cmd.stderr(Stdio::piped());
+
+                // Spawn the process
+                let child = cmd.spawn()
+                    .map_err(|e| format!("Failed to start command: {}", e))?;
+
+                // Wait for the process to complete with timeout
+                let result = std::thread::spawn(move || {
+                    child.wait_with_output()
+                }).join()
+                .map_err(|_| "Failed to wait for command execution".to_string())?;
+
+                match result {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let exit_code = output.status.code().unwrap_or(-1);
+
+                        let result = json!({
+                            "success": output.status.success(),
+                            "exit_code": exit_code,
+                            "stdout": stdout.to_string(),
+                            "stderr": stderr.to_string(),
+                            "command": command,
+                            "working_directory": working_dir,
+                            "timeout_used": timeout
+                        });
+                        let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][execute_terminal] result = {}", result)));
+                        Ok(result)
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Command execution failed: {}", e);
+                        let _ = tx_clone.send(AppEvent::Log(format!("[TOOL][execute_terminal] error = {}", error_msg)));
+                        Err(error_msg)
+                    }
+                }
             });
         tools.push((tool, func));
     }

@@ -2,6 +2,8 @@ use crate::runner::AppEvent;
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 use anyhow::Result;
+use tokio::process::Command;
+use std::process::Stdio;
 
 pub struct PomlExecutor {
     tx: UnboundedSender<AppEvent>,
@@ -19,31 +21,115 @@ impl PomlExecutor {
             return Ok(());
         }
 
-        // Read the POML file
-        let poml_content = match tokio::fs::read_to_string(file_path).await {
-            Ok(content) => content,
-            Err(e) => {
-                let _ = self.tx.send(AppEvent::Log(format!("Error reading POML file: {}", e)));
-                return Ok(());
-            }
-        };
-
-        // Extract variables from POML (simplified parsing)
-        let variables = self.extract_variables_from_poml(&poml_content).await?;
-        
         // Send execution start event
-        let _ = self.tx.send(AppEvent::Log(format!("Executing POML file: {}", file_path.display())));
-        let default_dir = PathBuf::from(".");
-        let _ = self.tx.send(AppEvent::Log(format!("Working directory: {:?}", working_dir.as_deref().unwrap_or(&default_dir))));
+        let _ = self.tx.send(AppEvent::Log(format!("Executing POML file via external CLI: {}", file_path.display())));
+        
+        let current_dir = if let Some(ref dir) = working_dir {
+            dir.clone()
+        } else {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        };
+        
+        let _ = self.tx.send(AppEvent::Log(format!("Working directory: {:?}", current_dir)));
 
-        // Here we would integrate with the actual POML execution
-        // For now, we'll just log the extracted variables
-        for (name, value) in &variables {
-            let _ = self.tx.send(AppEvent::Log(format!("Variable: {} = {}", name, value)));
+        // Build the external poml-cli command
+        let mut command = Command::new("python");
+        command.arg("-m").arg("poml");
+        command.arg("-f").arg(file_path.display().to_string());
+        
+        // Set working directory if specified
+        command.current_dir(&current_dir);
+
+        // Add environment variables that might be needed
+        command.env("POML_WORKING_DIR", current_dir.display().to_string());
+
+        // Set up stdout and stderr capture
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        // Log the command being executed
+        let command_str = format!("python -m poml -f {}", file_path.display());
+        let _ = self.tx.send(AppEvent::Log(format!("Executing: {}", command_str)));
+
+        // Spawn the command
+        let mut child = command
+            .spawn()
+            .map_err(|e| {
+                let error_msg = format!("Failed to start poml-cli: {}", e);
+                let _ = self.tx.send(AppEvent::Log(format!("Error: {}", error_msg)));
+                anyhow::anyhow!(error_msg)
+            })?;
+
+        // Wait for the command to complete
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| {
+                let error_msg = format!("Failed to wait for poml-cli execution: {}", e);
+                let _ = self.tx.send(AppEvent::Log(format!("Error: {}", error_msg)));
+                anyhow::anyhow!(error_msg)
+            })?;
+
+        // Process the output
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let _ = self.tx.send(AppEvent::Log(format!("POML execution successful")));
+            let _ = self.tx.send(AppEvent::Log(format!("Output:\n{}", stdout)));
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let error_msg = format!("POML execution failed: {}", stderr);
+            let _ = self.tx.send(AppEvent::Log(format!("Error: {}", error_msg)));
+            return Err(anyhow::anyhow!(error_msg));
         }
 
-        let _ = self.tx.send(AppEvent::Log("POML execution completed".to_string()));
+        // Check if poml-cli is available
+        self.check_poml_cli_availability().await?;
+
         Ok(())
+    }
+
+    async fn check_poml_cli_availability(&self) -> Result<()> {
+        // Check if python is available
+        let python_check = Command::new("python")
+            .arg("--version")
+            .output()
+            .await;
+
+        match python_check {
+            Ok(output) if !output.status.success() => {
+                let _ = self.tx.send(AppEvent::Log("Error: Python is not available".to_string()));
+                return Err(anyhow::anyhow!("Python is not available"));
+            }
+            Err(e) => {
+                let _ = self.tx.send(AppEvent::Log(format!("Error: Failed to check Python: {}", e)));
+                return Err(anyhow::anyhow!("Failed to check Python availability"));
+            }
+            _ => {}
+        }
+
+        // Check if poml module is available
+        let poml_check = Command::new("python")
+            .arg("-m")
+            .arg("poml")
+            .arg("--help")
+            .output()
+            .await;
+
+        match poml_check {
+            Ok(output) if output.status.success() => {
+                let _ = self.tx.send(AppEvent::Log("poml-cli is available".to_string()));
+                Ok(())
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let _ = self.tx.send(AppEvent::Log(format!("Error: poml-cli module not available: {}", stderr)));
+                Err(anyhow::anyhow!("poml-cli module not available"))
+            }
+            Err(e) => {
+                let _ = self.tx.send(AppEvent::Log(format!("Error: Failed to check poml-cli: {}", e)));
+                Err(anyhow::anyhow!("Failed to check poml-cli availability"))
+            }
+        }
     }
 
     async fn extract_variables_from_poml(&self, poml_content: &str) -> Result<std::collections::HashMap<String, String>> {
