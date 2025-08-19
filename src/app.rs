@@ -1,10 +1,10 @@
 use crate::commands::handle_command;
-use crate::nm_config::{WorkflowConfig, save_all_nm};
+use crate::nm_config::{WorkflowConfig, save_all_nm, AgentType};
 use crate::runner::{AppCommand, AppEvent};
 use ratatui::text::{Line, Span};
 use ratatui::style::{Style, Color, Modifier};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::layout::{Layout, Constraint, Position};
+use ratatui::layout::{Layout, Constraint, Position, Rect};
 use ratatui::Frame;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -120,31 +120,84 @@ impl App {
                 // Ctrl+D to quit (alternative to Ctrl+C)
                 return true;
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
-                // Handle regular character input - check if it's not a modifier key
-                self.insert_char(c);
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c'), .. }) => {
+                // Handle character input based on mode
+                match self.mode {
+                    Mode::Create => {
+                        // Handle create mode input
+                        if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+                            self.handle_create_input(c);
+                        }
+                    }
+                    _ => {
+                        // Handle regular character input - check if it's not a modifier key
+                        self.insert_char(c);
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, .. }) => {
                 // Insert newline instead of submitting
                 self.insert_char('\n');
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
-                self.submit();
+                match self.mode {
+                    Mode::Create => {
+                        self.handle_create_submit();
+                    }
+                    _ => {
+                        self.submit();
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
-                self.backspace();
+                match self.mode {
+                    Mode::Create => {
+                        self.handle_create_backspace();
+                    }
+                    _ => {
+                        self.backspace();
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Left, .. }) => {
-                self.move_cursor_left();
+                match self.mode {
+                    Mode::Create => {
+                        self.handle_create_left();
+                    }
+                    _ => {
+                        self.move_cursor_left();
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Right, .. }) => {
-                self.move_cursor_right();
+                match self.mode {
+                    Mode::Create => {
+                        self.handle_create_right();
+                    }
+                    _ => {
+                        self.move_cursor_right();
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
-                self.move_cursor_up();
+                match self.mode {
+                    Mode::Create => {
+                        self.handle_create_up();
+                    }
+                    _ => {
+                        self.move_cursor_up();
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
-                self.move_cursor_down();
+                match self.mode {
+                    Mode::Create => {
+                        self.handle_create_down();
+                    }
+                    _ => {
+                        self.move_cursor_down();
+                    }
+                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Esc, .. }) => {
                 if self.mode == Mode::Chat {
@@ -371,109 +424,120 @@ impl App {
 }
 
     pub fn render(&self, f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                Constraint::Min(1), // Messages area
-                Constraint::Length(8), // Input area
-            ])
-            .split(f.area());
-        
-        let main_area = chunks[0];
-        let input_area = chunks[1];
-        
-        // Render messages
-        let mut lines = Vec::new();
-        for m in &self.messages {
-            let style = match m.from {
-                "you" => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                "system" => Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-                "progress" => Style::default().fg(Color::Yellow),
-                "agent" => Style::default().fg(Color::Green),
-                "error" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                _ => Style::default().fg(Color::White),
-            };
-            
-            for (i, part) in m.text.lines().enumerate() {
-                if i == 0 {
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{}: ", m.from), style),
-                        Span::raw(part),
-                    ]));
+        // Handle different modes
+        match self.mode {
+            Mode::Create => {
+                // Create mode layout - full screen for create interface
+                let area = f.area();
+                self.render_create_mode(f, area);
+            }
+            _ => {
+                // Normal chat mode layout
+                let chunks = Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        Constraint::Min(1), // Messages area
+                        Constraint::Length(8), // Input area
+                    ])
+                    .split(f.area());
+                
+                let main_area = chunks[0];
+                let input_area = chunks[1];
+                
+                // Render messages
+                let mut lines = Vec::new();
+                for m in &self.messages {
+                    let style = match m.from {
+                        "you" => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        "system" => Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+                        "progress" => Style::default().fg(Color::Yellow),
+                        "agent" => Style::default().fg(Color::Green),
+                        "error" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        _ => Style::default().fg(Color::White),
+                    };
+                    
+                    for (i, part) in m.text.lines().enumerate() {
+                        if i == 0 {
+                            lines.push(Line::from(vec![
+                                Span::styled(format!("{}: ", m.from), style),
+                                Span::raw(part),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::raw("   "),
+                                Span::raw(part),
+                            ]));
+                        }
+                    }
+                }
+                
+                let para = Paragraph::new(lines)
+                    .block(Block::default()
+                        .borders(Borders::ALL)
+                        .title("💬 Messages")
+                        .title_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)))
+                    .wrap(Wrap { trim: false })
+                    .scroll((self.scroll_offset as u16, 0));
+                f.render_widget(para, main_area);
+                
+                // Render performance metrics if available using cached text
+                let metrics_text = if self.cached_metrics_text.is_empty() {
+                    vec![Line::from("No metrics data")]
                 } else {
-                    lines.push(Line::from(vec![
-                        Span::raw("   "),
-                        Span::raw(part),
-                    ]));
+                    vec![Line::from(self.cached_metrics_text.clone())]
+                };
+                
+                let metrics_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title("📊 Performance Metrics")
+                    .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD));
+                    
+                let metrics_para = Paragraph::new(metrics_text)
+                    .block(metrics_block)
+                    .style(Style::default().fg(Color::White));
+                
+                // Position metrics widget at the bottom right
+                let metrics_area = Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        Constraint::Min(1),
+                        Constraint::Length(3),
+                    ])
+                    .split(input_area)[1];
+                    
+                f.render_widget(metrics_para, metrics_area);
+                
+                // Enhanced multi-line input rendering with better styling
+                let input_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title("✍️ Input (Enter=submit, Shift+Enter=newline, Ctrl+C=quit)")
+                    .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD));
+                    
+                let input = Paragraph::new(self.input.as_str())
+                    .style(Style::default().fg(Color::Yellow))
+                    .block(input_block)
+                    .wrap(Wrap { trim: false });
+                f.render_widget(input, input_area);
+                
+                // Enhanced cursor positioning with visual feedback using helper methods
+                let lines: Vec<&str> = self.input.split('\n').collect();
+                let current_line = self.get_current_line_index() as u16;
+                let current_col = self.get_current_column_in_line() as u16;
+                let cx = input_area.x + 2 + current_col; // +2 for padding (block borders)
+                let cy = input_area.y + 1 + current_line; // +1 for padding (block title)
+                
+                // Fix cursor position - don't go past the end of the input
+                if self.input.is_empty() {
+                    // When input is empty, position at start
+                    f.set_cursor_position(Position::new(cx, cy));
+                } else if self.cursor_g == self.input.graphemes(true).count() {
+                    // When cursor is at end, position it properly without extra space
+                    f.set_cursor_position(Position::new(cx, cy));
+                } else {
+                    // Normal cursor position
+                    f.set_cursor_position(Position::new(cx, cy));
                 }
             }
-        }
-        
-        let para = Paragraph::new(lines)
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title("💬 Messages")
-                .title_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)))
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll_offset as u16, 0));
-        f.render_widget(para, main_area);
-        
-        // Render performance metrics if available using cached text
-        let metrics_text = if self.cached_metrics_text.is_empty() {
-            vec![Line::from("No metrics data")]
-        } else {
-            vec![Line::from(self.cached_metrics_text.clone())]
-        };
-        
-        let metrics_block = Block::default()
-            .borders(Borders::ALL)
-            .title("📊 Performance Metrics")
-            .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD));
-            
-        let metrics_para = Paragraph::new(metrics_text)
-            .block(metrics_block)
-            .style(Style::default().fg(Color::White));
-        
-        // Position metrics widget at the bottom right
-        let metrics_area = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(3),
-            ])
-            .split(input_area)[1];
-            
-        f.render_widget(metrics_para, metrics_area);
-        
-        // Enhanced multi-line input rendering with better styling
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .title("✍️ Input (Enter=submit, Shift+Enter=newline, Ctrl+C=quit)")
-            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD));
-            
-        let input = Paragraph::new(self.input.as_str())
-            .style(Style::default().fg(Color::Yellow))
-            .block(input_block)
-            .wrap(Wrap { trim: false });
-        f.render_widget(input, input_area);
-        
-        // Enhanced cursor positioning with visual feedback using helper methods
-        let lines: Vec<&str> = self.input.split('\n').collect();
-        let current_line = self.get_current_line_index() as u16;
-        let current_col = self.get_current_column_in_line() as u16;
-        let cx = input_area.x + 2 + current_col; // +2 for padding (block borders)
-        let cy = input_area.y + 1 + current_line; // +1 for padding (block title)
-        
-        // Fix cursor position - don't go past the end of the input
-        if self.cursor_g == self.input.graphemes(true).count() && self.input.is_empty() {
-            // When input is empty, position at start
-            f.set_cursor_position(Position::new(cx, cy));
-        } else if self.cursor_g == self.input.graphemes(true).count() {
-            // When cursor is at end, position it properly (not one space too far)
-            f.set_cursor_position(Position::new(cx + 1, cy));
-        } else {
-            // Normal cursor position
-            f.set_cursor_position(Position::new(cx, cy));
         }
     }
 
@@ -528,6 +592,148 @@ impl App {
             }
         }
         false
+    }
+
+    /// Create mode handling methods
+    pub fn handle_create_input(&mut self, c: char) {
+        // Handle input in create mode based on focus field
+        match self.create_focus {
+            0 => self.create_input.insert(0, c), // Workflow Name
+            1 => self.create_input.insert(0, c), // Model
+            2 => self.create_input.insert(0, c), // Temperature
+            3 => self.create_input.insert(0, c), // Number of Agents
+            4 => self.create_input.insert(0, c), // Maximum Traversals
+            5 => self.create_input.insert(0, c), // Working Directory
+            _ => {
+                // Handle agent-specific fields
+                let agent_idx = (self.create_focus - 6) / 5;
+                if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+                    if agent_idx < cfg.rows.len() {
+                        match (self.create_focus - 6) % 5 {
+                            0 => cfg.rows[agent_idx].agent_type = self.parse_agent_type(&self.create_input), // Agent Type
+                            1 => cfg.rows[agent_idx].files.push(c), // Files
+                            2 => cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3), // Max Iterations
+                            3 => cfg.rows[agent_idx].on_success = self.create_input.parse().ok(), // On Success
+                            4 => cfg.rows[agent_idx].on_failure = self.create_input.parse().ok(), // On Failure
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn handle_create_submit(&mut self) {
+        // Submit create mode input and save workflow
+        if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+            // Update workflow based on focus field
+            match self.create_focus {
+                0 => cfg.name = self.create_input.clone(),
+                1 => cfg.model = self.create_input.clone(),
+                2 => cfg.temperature = self.create_input.parse().unwrap_or(0.7),
+                3 => {
+                    let num_agents = self.create_input.parse().unwrap_or(1);
+                    if num_agents != cfg.rows.len() {
+                        // Resize agent rows
+                        if num_agents > cfg.rows.len() {
+                            for _ in cfg.rows.len()..num_agents {
+                                cfg.rows.push(AgentRow::default());
+                            }
+                        } else {
+                            cfg.rows.truncate(num_agents);
+                        }
+                    }
+                }
+                4 => cfg.maximum_traversals = self.create_input.parse().unwrap_or(20),
+                5 => cfg.working_dir = self.create_input.clone(),
+                _ => {
+                    // Handle agent-specific fields
+                    let agent_idx = (self.create_focus - 6) / 5;
+                    if agent_idx < cfg.rows.len() {
+                        match (self.create_focus - 6) % 5 {
+                            0 => cfg.rows[agent_idx].agent_type = self.parse_agent_type(&self.create_input),
+                            1 => cfg.rows[agent_idx].files = self.create_input.clone(),
+                            2 => cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3),
+                            3 => cfg.rows[agent_idx].on_success = self.create_input.parse().ok(),
+                            4 => cfg.rows[agent_idx].on_failure = self.create_input.parse().ok(),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            
+            // Save the workflow
+            let all: Vec<WorkflowConfig> = self.workflows.values().cloned().collect();
+            if let Err(e) = save_all_nm(&all) {
+                self.add_message("error", format!("Failed to save workflow: {}", e));
+            } else {
+                self.add_message("system", format!("Workflow '{}' updated successfully", cfg.name));
+            }
+        }
+        
+        // Clear create input and return to chat mode
+        self.create_input.clear();
+        self.mode = Mode::Chat;
+    }
+
+    pub fn handle_create_backspace(&mut self) {
+        if !self.create_input.is_empty() {
+            self.create_input.pop();
+        }
+    }
+
+    pub fn handle_create_left(&mut self) {
+        // Navigate to previous field in create mode
+        if self.create_focus > 0 {
+            self.create_focus -= 1;
+            self.create_input.clear(); // Clear input for new field
+        }
+    }
+
+    pub fn handle_create_right(&mut self) {
+        // Navigate to next field in create mode
+        if let Some(cfg) = self.workflows.get(&self.active_workflow) {
+            let max_focus = 6 + (cfg.rows.len() * 5); // 6 base fields + 5 per agent
+            if self.create_focus < max_focus {
+                self.create_focus += 1;
+                self.create_input.clear(); // Clear input for new field
+            }
+        }
+    }
+
+    pub fn handle_create_up(&mut self) {
+        // Navigate up in create mode (previous field in same column)
+        if self.create_focus >= 5 {
+            self.create_focus -= 5;
+            self.create_input.clear();
+        }
+    }
+
+    pub fn handle_create_down(&mut self) {
+        // Navigate down in create mode (next field in same column)
+        if let Some(cfg) = self.workflows.get(&self.active_workflow) {
+            let max_focus = 6 + (cfg.rows.len() * 5);
+            if self.create_focus < max_focus {
+                self.create_focus += 5;
+                self.create_input.clear();
+            }
+        }
+    }
+
+    /// Parse agent type from string
+    fn parse_agent_type(&self, input: &str) -> AgentType {
+        match input.to_lowercase().as_str() {
+            "validator" => AgentType::Validator,
+            "parallel" | "parallelagent" => AgentType::ParallelAgent,
+            _ => AgentType::Agent,
+        }
+    }
+
+    /// Render create mode UI
+    pub fn render_create_mode(&self, f: &mut Frame, area: Rect) {
+        if let Some(cfg) = self.workflows.get(&self.active_workflow) {
+            create_ui::render_create(f, cfg, self.create_focus, &self.create_input, area);
+        }
     }
 }
 

@@ -1,0 +1,90 @@
+<poml>
+  <let name="workflow_config">
+    {
+      "name": "example_workflow",
+      "model": "z-ai/glm-4.5",
+      "temperature": 0.7,
+      "maximum_traversals": 20,
+      "working_dir": ".",
+      "agents": [
+        {
+          "type": "Agent",
+          "files": "role:system:prompts/system.poml;role:user:prompts/user.poml",
+          "max_iterations": 3,
+          "on_success": 1,
+          "on_failure": 2
+        },
+        {
+          "type": "Validator", 
+          "files": "role:system:prompts/validator.poml",
+          "max_iterations": 2,
+          "on_success": null,
+          "on_failure": null
+        }
+      ]
+    }
+  </let>
+
+  <stylesheet>
+    {
+      "p": {
+        "syntax": "markdown"
+      }
+    }
+  </stylesheet>
+
+  <p>
+    # Example POML Workflow for Neonmachines
+    
+    This is an example workflow demonstrating how to create and configure 
+    AI workflows using POML (Prompting Markup Language) for Neonmachines.
+  </p>
+
+  <examples>
+    <example for="example in workflow_config.agents" chat="false" caption="Agent Configuration {{ loop.index + 1 }}">
+      <p>
+        **Agent {{ loop.index + 1}}:**
+        - Type: {{ example.type }}
+        - Files: {{ example.files }}
+        - Max Iterations: {{ example.max_iterations }}
+        - On Success: {{ example.on_success || 'null' }}
+        - On Failure: {{ example.on_failure || 'null' }}
+      </p>
+    </example>
+  </examples>
+
+  <p>
+    ## Workflow Configuration
+    
+    - **Name:** {{ workflow_config.name }}
+    - **Model:** {{ workflow_config.model }}
+    - **Temperature:** {{ workflow_config.temperature }}
+    - **Maximum Traversals:** {{ workflow_config.maximum_traversals }}
+    - **Working Directory:** {{ workflow_config.working_dir }}
+  </p>
+
+  <p>
+    ## Usage Instructions
+    
+    1. Save this file as `example_workflow.poml`
+    2. Run `neonmachines --poml-file example_workflow.poml` to execute
+    3. Or use the `/create` command in Neonmachines TUI to create a workflow based on this template
+  </p>
+
+  <p>
+    ## Creating Workflows in Neonmachines
+    
+    Use the `/create` command to create workflows interactively:
+    
+    ```
+    /create new_workflow_name
+    ```
+    
+    Then navigate through the fields using arrow keys and edit values:
+    
+    - Use arrow keys to navigate between fields
+    - Type to edit current field values
+    - Press Enter to save and return to chat mode
+    - Press Esc to cancel and return to chat mode
+  </p>
+</poml>
