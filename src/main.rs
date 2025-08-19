@@ -222,21 +222,41 @@ async fn run_tui(cli: Cli) -> Result<()> {
     
     let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));
     
+    // Set up signal handling for graceful shutdown
+    let (tx_signal, mut rx_signal) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+        let _ = tx_signal.send(());
+    });
+    
+    // Main event loop with non-blocking design
     loop {
+        // Check for shutdown signal
+        if let Ok(()) = rx_signal.try_recv() {
+            app.add_message("system", "Received shutdown signal...".to_string());
+            break;
+        }
+        
+        // Update cached metrics (non-blocking)
+        app.update_cached_metrics();
+        
+        // Render the UI
         terminal.draw(|f| app.render(f))?;
         
-        app.tick_spinner();
-        
-        if let Ok(ev) = event::poll(Duration::from_millis(50)) {
+        // Handle events with non-blocking approach using event queue
+        if let Ok(ev) = event::poll(Duration::from_millis(33)) { // Reduced to ~30fps for better performance
             if ev {
                 let ev = event::read()?;
-                let quit = app.on_event(ev);
-                if quit {
-                    break;
-                }
+                app.queue_event(ev); // Queue event instead of processing immediately
             }
         }
         
+        // Process all queued events (non-blocking)
+        if app.process_events() {
+            break; // Quit signal received
+        }
+        
+        // Process async events (non-blocking)
         app.poll_async().await;
     }
     

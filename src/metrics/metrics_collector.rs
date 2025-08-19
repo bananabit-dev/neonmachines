@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc, Duration};
 use std::fs;
 use std::path::PathBuf;
 use uuid;
-use futures;
 use serde::{Serialize, Deserialize};
 
 /// Time range for historical data queries
@@ -446,15 +445,18 @@ impl MetricsCollector {
     }
 
     pub fn get_request_summary_sync(&self) -> String {
-        // Using futures::executor::block_on for sync access
-        let metrics = futures::executor::block_on(self.metrics.read());
-        format!(
-            "Requests: {}, Success: {}, Error Rate: {:.2}%, Avg Time: {}ms",
-            metrics.request_count,
-            metrics.success_count,
-            metrics.get_error_rate() * 100.0,
-            metrics.average_response_time.num_milliseconds()
-        )
+        // Use try_read to avoid blocking, fallback to empty string if lock is unavailable
+        if let Ok(metrics) = self.metrics.try_read() {
+            format!(
+                "Requests: {}, Success: {}, Error Rate: {:.2}%, Avg Time: {}ms",
+                metrics.request_count,
+                metrics.success_count,
+                metrics.get_error_rate() * 100.0,
+                metrics.average_response_time.num_milliseconds()
+            )
+        } else {
+            "Metrics temporarily unavailable".to_string()
+        }
     }
 
     pub async fn get_historical_data(&self) -> HistoricalPerformanceData {

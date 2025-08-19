@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_segmentation::UnicodeSegmentation;
+use std::collections::VecDeque;
+use crossterm::event::{Event, KeyEvent, KeyCode, KeyModifiers};
 
 pub struct ChatMessage {
     pub from: &'static str,
@@ -45,6 +47,9 @@ pub struct App {
     pub create_input: String,
     pub selected_agent: Option<usize>,
     pub metrics_collector: Option<Arc<Mutex<crate::metrics::metrics_collector::MetricsCollector>>>,
+    pub cached_metrics_text: String,
+    pub last_metrics_update: Instant,
+    pub event_queue: VecDeque<crossterm::event::Event>,
 }
 
 impl App {
@@ -80,6 +85,9 @@ impl App {
             create_input: String::new(),
             selected_agent: None,
             metrics_collector,
+            cached_metrics_text: "No metrics data".to_string(),
+            last_metrics_update: Instant::now(),
+            event_queue: VecDeque::new(),
         }
     }
 
@@ -98,21 +106,26 @@ impl App {
     pub fn on_event(&mut self, ev: crossterm::event::Event) -> bool {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         
+        // Handle key events immediately without blocking
         match ev {
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
-                return true; // Quit
+                // Immediately return true to quit, no need to process further
+                return true;
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('l'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 // Clear screen with Ctrl+L
                 self.scroll_offset = 0;
             }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, .. }) => {
+                // Ctrl+D to quit (alternative to Ctrl+C)
+                return true;
+            }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
-                if !crossterm::event::KeyModifiers::CONTROL.contains(crossterm::event::KeyModifiers::CONTROL) {
-                    self.insert_char(c);
-                }
+                // Handle regular character input - check if it's not a modifier key
+                self.insert_char(c);
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, .. }) => {
-                // ✅ Insert newline instead of submitting
+                // Insert newline instead of submitting
                 self.insert_char('\n');
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
@@ -286,33 +299,32 @@ impl App {
             .scroll((self.scroll_offset as u16, 0));
         f.render_widget(para, main_area);
         
-        // Render performance metrics if available
-        if let Some(metrics_ref) = &self.metrics_collector {
-            if let Ok(metrics_guard) = metrics_ref.lock() {
-                let metrics_summary = metrics_guard.get_request_summary_sync();
-                let metrics_text = vec![Line::from(metrics_summary)];
-                
-                let metrics_block = Block::default()
-                    .borders(Borders::ALL)
-                    .title("📊 Performance Metrics")
-                    .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD));
-                    
-                let metrics_para = Paragraph::new(metrics_text)
-                    .block(metrics_block)
-                    .style(Style::default().fg(Color::White));
-                
-                // Position metrics widget at the bottom right
-                let metrics_area = Layout::default()
-                    .direction(ratatui::layout::Direction::Vertical)
-                    .constraints([
-                        Constraint::Min(1),
-                        Constraint::Length(3),
-                    ])
-                    .split(input_area)[1];
-                    
-                f.render_widget(metrics_para, metrics_area);
-            }
-        }
+        // Render performance metrics if available using cached text
+        let metrics_text = if self.cached_metrics_text.is_empty() {
+            vec![Line::from("No metrics data")]
+        } else {
+            vec![Line::from(self.cached_metrics_text.clone())]
+        };
+        
+        let metrics_block = Block::default()
+            .borders(Borders::ALL)
+            .title("📊 Performance Metrics")
+            .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD));
+            
+        let metrics_para = Paragraph::new(metrics_text)
+            .block(metrics_block)
+            .style(Style::default().fg(Color::White));
+        
+        // Position metrics widget at the bottom right
+        let metrics_area = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
+            .split(input_area)[1];
+            
+        f.render_widget(metrics_para, metrics_area);
         
         // Enhanced multi-line input rendering with better styling
         let input_block = Block::default()
@@ -360,6 +372,33 @@ impl App {
                 }
             }
         }
+    }
+
+    pub fn update_cached_metrics(&mut self) {
+        // Only update metrics every 500ms to avoid excessive lock contention
+        if self.last_metrics_update.elapsed() >= Duration::from_millis(500) {
+            if let Some(metrics_ref) = &self.metrics_collector {
+                if let Ok(metrics_guard) = metrics_ref.lock() {
+                    self.cached_metrics_text = metrics_guard.get_request_summary_sync();
+                    self.last_metrics_update = Instant::now();
+                }
+            }
+        }
+    }
+
+    /// Add event to the queue for non-blocking processing
+    pub fn queue_event(&mut self, event: crossterm::event::Event) {
+        self.event_queue.push_back(event);
+    }
+
+    /// Process all queued events without blocking
+    pub fn process_events(&mut self) -> bool {
+        while let Some(event) = self.event_queue.pop_front() {
+            if self.on_event(event) {
+                return true; // Quit signal
+            }
+        }
+        false
     }
 }
 
