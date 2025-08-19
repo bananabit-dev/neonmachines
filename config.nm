@@ -12,20 +12,6 @@ on_failure:-1
 
 ====
 
-workflow:chatting
-model:z-ai/glm-4.5-air:free
-temperature:0.7
-maximum_traversals:20
-working_dir:.
-agent_1: Agent
-files:"role:system:chat_system.poml;role:user:chat_user.poml"
-maximum_iterations:20
-iteration_delay_ms:500
-on_success:-1
-on_failure:0
-
-====
-
 workflow:security_check
 model:z-ai/glm-4.5-air:free
 temperature:0.7
@@ -71,3 +57,17 @@ maximum_iterations:3
 iteration_delay_ms:200
 on_success:-1
 on_failure:-1
+
+====
+
+workflow:chatting
+model:z-ai/glm-4.5-air:free
+temperature:0.7
+maximum_traversals:20
+working_dir:.
+agent_1: Agent
+files:"role:system:chat_system.poml;role:user:chat_user.poml"
+maximum_iterations:20
+iteration_delay_ms:500
+on_success:-1
+on_failure:0

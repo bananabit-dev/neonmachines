@@ -750,19 +750,19 @@ impl App {
     }
 
     pub fn handle_create_left(&mut self) {
-        // Navigate to previous field in create mode
-        if self.create_focus > 0 {
-            self.create_focus -= 1;
+        // Navigate to previous agent in create mode
+        if self.create_focus >= 11 { // Only allow navigation if we're past the first agent
+            self.create_focus -= 5; // Move left by 5 fields to previous agent
             self.create_input.clear(); // Clear input for new field
         }
     }
 
     pub fn handle_create_right(&mut self) {
-        // Navigate to next field in create mode
+        // Navigate to next agent in create mode
         if let Some(cfg) = self.workflows.get(&self.active_workflow) {
             let max_focus = 6 + (cfg.rows.len() * 5); // 6 base fields + 5 per agent
-            if self.create_focus < max_focus {
-                self.create_focus += 1;
+            if self.create_focus < max_focus - 5 { // Don't go past the last agent
+                self.create_focus += 5; // Move right by 5 fields to next agent
                 self.create_input.clear(); // Clear input for new field
             }
         }
@@ -771,7 +771,7 @@ impl App {
     pub fn handle_create_up(&mut self) {
         // Navigate up in create mode (previous field in same column)
         if self.create_focus >= 5 {
-            self.create_focus -= 1; // Move up by 1 field, not 5
+            self.create_focus -= 5; // Move up by 5 fields to stay in same column
             self.create_input.clear();
         }
     }
@@ -781,7 +781,7 @@ impl App {
         if let Some(cfg) = self.workflows.get(&self.active_workflow) {
             let max_focus = 6 + (cfg.rows.len() * 5); // 6 base fields + 5 per agent
             if self.create_focus < max_focus {
-                self.create_focus += 1; // Move down by 1 field, not 5
+                self.create_focus += 5; // Move down by 5 fields to stay in same column
                 self.create_input.clear(); // Clear input for new field
             }
         }
