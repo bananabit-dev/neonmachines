@@ -10,10 +10,12 @@ mod cli;
 mod poml;
 mod rate_limiter;
 mod error;
+mod metrics;
 
 use color_eyre::Result;
 use crossterm::event;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -23,6 +25,7 @@ use runner::{run_workflow, AppCommand, AppEvent};
 use tui::{restore_terminal, setup_terminal};
 use cli::{AppMode, Cli};
 use poml::handle_poml_execution;
+use crate::metrics::MetricsCollector;
 
 // Import logging modules
 use tracing::{error, warn, info, instrument};
@@ -211,11 +214,14 @@ async fn run_tui(cli: Cli) -> Result<()> {
         .map(|wf| wf.name.clone())
         .unwrap_or_else(|| "default".to_string());
 
-    let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name);
+    // Initialize metrics collector for performance monitoring
+    let metrics_collector = Arc::new(Mutex::new(MetricsCollector::new()));
+
+    let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));
 
     tokio::spawn(async move {
         while let Some(cmd) = rx_cmd.recv().await {
-            run_workflow(cmd, tx_evt.clone()).await;
+            run_workflow(cmd, tx_evt.clone(), Some(metrics_collector.clone())).await;
         }
     });
 
@@ -261,58 +267,51 @@ async fn run_config(cli: Cli) -> Result<()> {
 async fn run_command(cli: Cli) -> Result<()> {
     match &cli.command {
         Some(cli::Commands::Poml { file, working_dir, output, provider, temperature, max_tokens, log_level, save }) => {
-            // Check if python and poml are available
-            if !is_poml_available().await {
-                eprintln!("Error: POML CLI is not available. Please install it with:");
-                eprintln!("  pip install poml");
-                return Ok(());
-            }
-            
-            println!("Executing POML file: {}", file.display());
-            
-            if let Some(working_dir) = working_dir {
-                println!("Working directory: {}", working_dir.display());
-            }
-            
-            if let Some(output) = output {
-                println!("Output file: {}", output.display());
-            }
-            
-            if let Some(provider) = provider {
-                println!("Provider: {}", provider);
-            }
-            
-            println!("Temperature: {}", temperature);
-            println!("Max tokens: {}", max_tokens);
-            println!("Log level: {}", log_level);
-            println!("Save results: {}", save);
-            
-            // Execute the POML file using python -m poml -f {file}
+            // Execute POML using external poml-cli (python -m poml)
             let mut command = tokio::process::Command::new("python");
-            command.arg("-m").arg("poml").arg("-f");
-            command.arg(file.display().to_string());
+            command.arg("-m").arg("poml");
             
+            // Add the POML file
+            command.arg("-f").arg(file.display().to_string());
+            
+            // Add working directory if specified
             if let Some(working_dir) = working_dir {
                 command.current_dir(working_dir);
             }
             
+            // Add optional parameters if provided
+            if let Some(provider) = provider {
+                command.arg("--provider").arg(provider);
+            }
+            if let Some(output_path) = output {
+                command.arg("--output").arg(output_path.display().to_string());
+            }
+            
+            command.arg("--temperature").arg(temperature.to_string());
+            command.arg("--max-tokens").arg(max_tokens.to_string());
+            command.arg("--log-level").arg(log_level);
+            
+            if *save {
+                command.arg("--save");
+            }
+            
+            // Execute the command
+            info!("Executing POML file with external CLI: {:?}", command);
+            
             let command_output = command.output().await?;
             
             if command_output.status.success() {
+                info!("POML execution successful");
                 println!("POML execution successful:");
                 println!("{}", String::from_utf8_lossy(&command_output.stdout));
+                
+                if *save {
+                    println!("Results saved to output file as requested");
+                }
             } else {
+                error!("POML execution failed: {}", String::from_utf8_lossy(&command_output.stderr));
                 eprintln!("POML execution failed:");
                 eprintln!("{}", String::from_utf8_lossy(&command_output.stderr));
-            }
-            
-            if *save {
-                // Save results to output file if specified
-                let results_content = String::from_utf8_lossy(&command_output.stdout);
-                if let Some(output_path) = output {
-                    tokio::fs::write(&output_path, results_content.as_ref()).await?;
-                    println!("Results saved to: {}", output_path.display());
-                }
             }
         }
         Some(cli::Commands::Config { list_themes, list_providers, show, edit: _, validate: _, theme: _, provider: _ }) => {

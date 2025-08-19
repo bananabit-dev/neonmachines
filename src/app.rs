@@ -1,12 +1,14 @@
 use crate::commands::handle_command;
 use crate::nm_config::{save_all_nm, AgentRow, AgentType, WorkflowConfig};
 use crate::runner::{AppCommand, AppEvent};
+use crate::metrics::{MetricsCollector, charts};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Position};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap, Gauge, BarChart};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedSender;
 use unicode_segmentation::UnicodeSegmentation;
@@ -42,6 +44,10 @@ pub struct App {
     pub auto_scroll: bool,
     
     pub selected_agent: Option<usize>,
+    
+    pub metrics: Option<Arc<Mutex<MetricsCollector>>>,
+    
+    pub dashboard_mode: charts::DashboardMode,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,6 +56,7 @@ pub enum Mode {
     Create,
     Workflow,
     InteractiveChat,
+    Dashboard,
 }
 
 impl App {
@@ -58,6 +65,7 @@ impl App {
         rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
         workflows: HashMap<String, WorkflowConfig>,
         active: String,
+        metrics: Option<Arc<Mutex<MetricsCollector>>>,
     ) -> Self {
         Self {
             messages: vec![ChatMessage {
@@ -81,6 +89,8 @@ impl App {
             scroll_offset: 0,
             auto_scroll: true,
             selected_agent: None,
+            metrics,
+            dashboard_mode: charts::DashboardMode::Overview,
         }
     }
 
@@ -437,6 +447,30 @@ impl App {
                     .wrap(Wrap { trim: false })
                     .scroll((self.scroll_offset as u16, 0));
                 f.render_widget(para, main_area);
+
+                // Render performance metrics if available
+                if let Some(metrics_ref) = &self.metrics {
+                    if let Ok(mut metrics_guard) = metrics_ref.lock() {
+                        let metrics_summary = metrics_guard.get_request_summary().await;
+                        let metrics_block = Block::default()
+                            .borders(Borders::ALL)
+                            .title("📊 Performance Metrics")
+                            .title_style(Style::default().fg(Color::Magenta).bold());
+                        
+                        let metrics_text = Text::from(metrics_summary);
+                        let metrics_para = Paragraph::new(metrics_text)
+                            .block(metrics_block)
+                            .style(Style::default().fg(Color::White));
+                        
+                        // Position metrics widget at the bottom right
+                        let metrics_area = Layout::horizontal([
+                            Constraint::Percentage(70),
+                            Constraint::Percentage(30),
+                        ]).split(input_area)[1];
+                        
+                        f.render_widget(metrics_para, metrics_area);
+                    }
+                }
 
                 // Enhanced multi-line input rendering with better styling
                 let input_block = Block::default()

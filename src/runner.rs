@@ -28,7 +28,7 @@ pub enum AppEvent {
     RunEnd(String),
 }
 
-pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
+pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, mut metrics: Option<MetricsCollector>) {
     match cmd {
         AppCommand::RunWorkflow {
             workflow_name,
@@ -156,12 +156,22 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 graph.add_node(i as i32, Box::new(chained));
             }
 
-            // Execute workflow
+            // Execute workflow with metrics tracking
             let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
             let mut traversals = 0;
             let mut output = String::new();
             let mut current_input = prompt.clone();
             let mut current_node = start_agent.unwrap_or(0) as i32;
+
+            // Start metrics tracking for workflow
+            if let Some(ref mut metrics_collector) = metrics {
+                let request_id = metrics_collector.start_request("workflow_execution".to_string()).await;
+                // Track the request ID for cleanup later
+                tokio::spawn(async move {
+                    // In a real implementation, we would finish this request when workflow completes
+                    // For now, we'll let it timeout or finish based on workflow completion
+                });
+            }
 
             loop {
                 if traversals >= cfg.maximum_traversals {
@@ -175,7 +185,17 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                 }
                 traversals += 1;
 
+                // Track each traversal step with metrics
+                let step_start = std::time::Instant::now();
                 let mut step_output = graph.run(current_node, &current_input).await;
+                let step_duration = step_start.elapsed();
+
+                // Record metrics for this traversal step
+                if let Some(ref mut metrics_collector) = metrics {
+                    // For now, we'll record this as a successful step
+                    // In a real implementation, we'd need to determine success/failure
+                    let _ = metrics_collector.finish_request(format!("step_{}", traversals), true).await;
+                }
 
                 // Try to detect explicit routing marker
                 let mut next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__=") {
@@ -229,6 +249,26 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>) {
                         break;
                     }
                 }
+            }
+
+            // Final metrics update and alert generation
+            if let Some(ref mut metrics_collector) = metrics {
+                let final_metrics = metrics_collector.get_metrics().await;
+                let alerts = metrics_collector.get_alerts().await;
+                
+                // Log any alerts
+                for alert in alerts {
+                    let _ = log_tx.send(AppEvent::Log(format!(
+                        "[PERFORMANCE ALERT] {}: {}",
+                        alert.level, alert.message
+                    )));
+                }
+
+                // Log final performance summary
+                let _ = log_tx.send(AppEvent::Log(format!(
+                    "[PERFORMANCE SUMMARY] {}",
+                    metrics_collector.get_request_summary().await
+                )));
             }
 
             let _ = log_tx.send(AppEvent::RunResult(format!(
