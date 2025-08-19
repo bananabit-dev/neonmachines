@@ -267,8 +267,23 @@ async fn run_tui(cli: Cli) -> Result<()> {
 }
 
 async fn run_web(cli: Cli) -> Result<()> {
-    println!("Web interface not yet implemented. Starting TUI instead.");
-    println!("Would run on http://{}:{}/ with theme: {}", cli.get_host(), cli.get_port(), cli.theme);
+    info!("Starting web interface on http://{}:{}/", cli.get_host(), cli.get_port());
+    println!("🚀 Starting Neonmachines Web Interface");
+    println!("📍 URL: http://{}:{}/", cli.get_host(), cli.get_port());
+    println!("🎨 Theme: {}", cli.theme);
+    if let Some(avatar) = &cli.avatar {
+        println!("🖼️ Avatar: {}", avatar.display());
+    }
+    println!();
+    println!("⚠️  Web interface is currently under development.");
+    println!("📝 For now, starting in TUI mode instead.");
+    println!();
+    
+    // Initialize logging for web mode
+    let log_file = cli.log_file.clone().unwrap_or_else(|| PathBuf::from("neonmachines.log"));
+    println!("📄 Logging to file: {}", log_file.display());
+    
+    // Start TUI mode instead
     run_tui(cli).await
 }
 

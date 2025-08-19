@@ -271,6 +271,90 @@ pub fn handle_command(
                 });
             }
         }
+        "/trace" => {
+            let mut parts = it;
+            if let Some(action) = parts.next() {
+                match action.to_lowercase().as_str() {
+                    "on" | "enable" => {
+                        // Create trace log file to enable tracing
+                        let trace_file_path = "neonmachines/.neonmachines_data/trace.log";
+                        if let Err(e) = std::fs::File::create(trace_file_path) {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: format!("Failed to enable tracing: {}", e),
+                            });
+                        } else {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: "Tracing enabled. AI API calls will be logged to .neonmachines_data/trace.log".to_string(),
+                            });
+                        }
+                    }
+                    "off" | "disable" => {
+                        // Remove trace log file to disable tracing
+                        let trace_file_path = "neonmachines/.neonmachines_data/trace.log";
+                        if let Err(e) = std::fs::remove_file(trace_file_path) {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: format!("Failed to disable tracing: {}", e),
+                            });
+                        } else {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: "Tracing disabled".to_string(),
+                            });
+                        }
+                    }
+                    "status" => {
+                        let trace_file_path = "neonmachines/.neonmachines_data/trace.log";
+                        let status = if std::path::Path::new(trace_file_path).exists() {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        };
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: format!("Tracing is {}", status),
+                        });
+                    }
+                    "show" => {
+                        let trace_file_path = "neonmachines/.neonmachines_data/trace.log";
+                        if std::path::Path::new(trace_file_path).exists() {
+                            match std::fs::read_to_string(trace_file_path) {
+                                Ok(content) => {
+                                    messages.push(ChatMessage {
+                                        from: "system",
+                                        text: format!("Trace log:\n\n{}", content),
+                                    });
+                                }
+                                Err(e) => {
+                                    messages.push(ChatMessage {
+                                        from: "system",
+                                        text: format!("Failed to read trace log: {}", e),
+                                    });
+                                }
+                            }
+                        } else {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: "Tracing is disabled. No trace log available.".to_string(),
+                            });
+                        }
+                    }
+                    _ => {
+                        messages.push(ChatMessage {
+                            from: "system",
+                            text: "Usage: /trace [on|off|status|show]".to_string(),
+                        });
+                    }
+                }
+            } else {
+                messages.push(ChatMessage {
+                    from: "system",
+                    text: "Usage: /trace [on|off|status|show]".to_string(),
+                });
+            }
+        }
         "/help" => {
             help_command(messages);
         }
@@ -295,6 +379,7 @@ Available commands:
 /chat                - Enter interactive chat mode
 /agent [number|none|list] - Select agent for routing
 /history [agent|all] - Show execution history
+/trace [on|off|show] - Enable/disable/view tracing
 /help                - Show this help message
 
 Navigation:
@@ -309,6 +394,7 @@ Examples:
 /agent 2 - Select agent 2 for routing
 /agent none - Use default routing
 /create newworkflow - Create new workflow named 'newworkflow'
+/trace on - Enable API call tracing
 "#;
     messages.push(ChatMessage {
         from: "system",

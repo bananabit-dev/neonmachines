@@ -396,6 +396,23 @@ pub async fn generate_with_retry(
 ) -> Result<serde_json::Value, NeonmachinesError> {
     let config = retry_config.unwrap_or_else(RetryConfig::default);
     
+    // Check if tracing is enabled and log the request
+    let trace_enabled = std::path::Path::new("neonmachines/.neonmachines_data/trace.log").exists();
+    let start_time = std::time::Instant::now();
+    
+    if trace_enabled {
+        let trace_message = format!(
+            "API Request Started - Model: {}, Temperature: {}, Messages: {}, Tools: {:?}",
+            model, temperature, messages.len(), tools.is_some()
+        );
+        if let Err(e) = std::fs::write(
+            "neonmachines/.neonmachines_data/trace.log", 
+            format!("\n{}\nTimestamp: {}\n", trace_message, chrono::Utc::now())
+        ) {
+            warn!("Failed to write to trace log: {}", e);
+        }
+    }
+    
     // Create a simple retry wrapper for generate_full_response
     let operation = || {
         let base_url = base_url.clone();
@@ -425,15 +442,48 @@ pub async fn generate_with_retry(
                         "model": model_for_response,
                         "temperature": temperature
                     });
+                    
+                    // Log successful response if tracing is enabled
+                    if trace_enabled {
+                        let duration = start_time.elapsed();
+                        let trace_message = format!(
+                            "API Request Succeeded - Duration: {:?}, Response: {}",
+                            duration,
+                            serde_json::to_string(&response_json).unwrap_or_else(|_| "Failed to serialize".to_string())
+                        );
+                        if let Err(e) = std::fs::write(
+                            "neonmachines/.neonmachines_data/trace.log", 
+                            format!("{}\nTimestamp: {}\n", trace_message, chrono::Utc::now())
+                        ) {
+                            warn!("Failed to write to trace log: {}", e);
+                        }
+                    }
+                    
                     Ok::<serde_json::Value, NeonmachinesError>(response_json)
                 }
-                Err(e) => Err::<serde_json::Value, NeonmachinesError>(NeonmachinesError::Unexpected(format!("API call failed: {}", e)))
+                Err(e) => {
+                    // Log failed response if tracing is enabled
+                    if trace_enabled {
+                        let duration = start_time.elapsed();
+                        let trace_message = format!(
+                            "API Request Failed - Duration: {:?}, Error: {}",
+                            duration, e
+                        );
+                        if let Err(e) = std::fs::write(
+                            "neonmachines/.neonmachines_data/trace.log", 
+                            format!("{}\nTimestamp: {}\n", trace_message, chrono::Utc::now())
+                        ) {
+                            warn!("Failed to write to trace log: {}", e);
+                        }
+                    }
+                    Err::<serde_json::Value, NeonmachinesError>(NeonmachinesError::Unexpected(format!("API call failed: {}", e)))
+                }
             }
         }) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, NeonmachinesError>> + Send>>
     };
 
     // Apply retry logic with optional circuit breaker
-    if let Some(mut cb) = circuit_breaker {
+    let final_result = if let Some(mut cb) = circuit_breaker {
         match retry_with_circuit_breaker(&mut cb, &config, operation).await {
             Ok(result) => Ok(result),
             Err(e) => Err(NeonmachinesError::Unexpected(format!("Circuit breaker error: {}", e)))
@@ -443,5 +493,31 @@ pub async fn generate_with_retry(
             Ok(result) => Ok(result),
             Err(e) => Err(NeonmachinesError::Unexpected(format!("Retry error: {}", e)))
         }
+    };
+    
+    // Log the final result
+    if trace_enabled {
+        let duration = start_time.elapsed();
+        let mut trace_message = format!(
+            "API Request Final Result - Duration: {:?}, Success: {}",
+            duration, 
+            if final_result.is_ok() { "true" } else { "false" }
+        );
+        if let Ok(result) = &final_result {
+            if let Ok(result_str) = serde_json::to_string(result) {
+                trace_message.push_str(&format!("\nResult: {}", result_str));
+            }
+        } else if let Err(e) = &final_result {
+            trace_message.push_str(&format!("\nError: {}", e));
+        }
+        
+        if let Err(e) = std::fs::write(
+            "neonmachines/.neonmachines_data/trace.log", 
+            format!("{}\nTimestamp: {}\n", trace_message, chrono::Utc::now())
+        ) {
+            warn!("Failed to write to trace log: {}", e);
+        }
     }
+    
+    final_result
 }

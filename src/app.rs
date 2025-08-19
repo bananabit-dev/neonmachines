@@ -599,39 +599,65 @@ impl App {
     pub fn handle_create_input(&mut self, c: char) {
         // Handle input in create mode based on focus field
         match self.create_focus {
-            0 => self.create_input.insert(0, c), // Workflow Name
-            1 => self.create_input.insert(0, c), // Model
-            2 => self.create_input.insert(0, c), // Temperature
-            3 => self.create_input.insert(0, c), // Number of Agents
-            4 => self.create_input.insert(0, c), // Maximum Traversals
-            5 => self.create_input.insert(0, c), // Working Directory
+            0 => {
+                // Workflow Name - append to end
+                self.create_input.push(c);
+            }
+            1 => {
+                // Model - append to end
+                self.create_input.push(c);
+            }
+            2 => {
+                // Temperature - append to end
+                self.create_input.push(c);
+            }
+            3 => {
+                // Number of Agents - append to end
+                self.create_input.push(c);
+            }
+            4 => {
+                // Maximum Traversals - append to end
+                self.create_input.push(c);
+            }
+            5 => {
+                // Working Directory - append to end
+                self.create_input.push(c);
+            }
             _ => {
                 // Handle agent-specific fields
                 let agent_idx = (self.create_focus - 6) / 5;
-                // Only proceed if we have a valid workflow and agent index
-                if !self.create_input.is_empty() {
-                    // Parse agent type first to avoid borrow checker issues
-                    let agent_type = if (self.create_focus - 6) % 5 == 0 {
-                        Some(self.parse_agent_type(&self.create_input))
-                    } else {
-                        None
-                    };
-                    
-                    if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
-                        if agent_idx < cfg.rows.len() {
-                            match (self.create_focus - 6) % 5 {
-                                0 => {
-                                    // Use pre-parsed agent type
-                                    if let Some(at) = agent_type {
-                                        cfg.rows[agent_idx].agent_type = at;
-                                    }
-                                }
-                                1 => cfg.rows[agent_idx].files.push(c), // Files
-                                2 => cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3), // Max Iterations
-                                3 => cfg.rows[agent_idx].on_success = self.create_input.parse().ok(), // On Success
-                                4 => cfg.rows[agent_idx].on_failure = self.create_input.parse().ok(), // On Failure
-                                _ => {}
+                let field_type = (self.create_focus - 6) % 5;
+                
+                if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+                    if agent_idx < cfg.rows.len() {
+                        match field_type {
+                            0 => {
+                                // Agent Type - append to input and update immediately
+                                self.create_input.push(c);
+                                // Parse agent type and update workflow using static function
+                                let new_type = Self::parse_agent_type_static(&self.create_input);
+                                cfg.rows[agent_idx].agent_type = new_type;
                             }
+                            1 => {
+                                // Files - append to end
+                                cfg.rows[agent_idx].files.push(c);
+                            }
+                            2 => {
+                                // Max Iterations - append to end
+                                self.create_input.push(c);
+                                cfg.rows[agent_idx].max_iterations = self.create_input.parse().unwrap_or(3);
+                            }
+                            3 => {
+                                // On Success - append to end
+                                self.create_input.push(c);
+                                cfg.rows[agent_idx].on_success = self.create_input.parse().ok();
+                            }
+                            4 => {
+                                // On Failure - append to end
+                                self.create_input.push(c);
+                                cfg.rows[agent_idx].on_failure = self.create_input.parse().ok();
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -712,9 +738,9 @@ impl App {
             }
         }
         
-        // Clear create input and return to chat mode
+        // Clear create input but stay in create mode
         self.create_input.clear();
-        self.mode = Mode::Chat;
+        // Don't change mode - stay in Mode::Create
     }
 
     pub fn handle_create_backspace(&mut self) {
@@ -745,7 +771,7 @@ impl App {
     pub fn handle_create_up(&mut self) {
         // Navigate up in create mode (previous field in same column)
         if self.create_focus >= 5 {
-            self.create_focus -= 5;
+            self.create_focus -= 1; // Move up by 1 field, not 5
             self.create_input.clear();
         }
     }
@@ -753,16 +779,25 @@ impl App {
     pub fn handle_create_down(&mut self) {
         // Navigate down in create mode (next field in same column)
         if let Some(cfg) = self.workflows.get(&self.active_workflow) {
-            let max_focus = 6 + (cfg.rows.len() * 5);
+            let max_focus = 6 + (cfg.rows.len() * 5); // 6 base fields + 5 per agent
             if self.create_focus < max_focus {
-                self.create_focus += 5;
-                self.create_input.clear();
+                self.create_focus += 1; // Move down by 1 field, not 5
+                self.create_input.clear(); // Clear input for new field
             }
         }
     }
 
     /// Parse agent type from string
     fn parse_agent_type(&self, input: &str) -> AgentType {
+        match input.to_lowercase().as_str() {
+            "validator" => AgentType::Validator,
+            "parallel" | "parallelagent" => AgentType::ParallelAgent,
+            _ => AgentType::Agent,
+        }
+    }
+
+    /// Parse agent type from string without borrowing self
+    fn parse_agent_type_static(input: &str) -> AgentType {
         match input.to_lowercase().as_str() {
             "validator" => AgentType::Validator,
             "parallel" | "parallelagent" => AgentType::ParallelAgent,
