@@ -4,6 +4,7 @@ use crate::shared_history::SharedHistory;
 use crate::tools::builtin_tools_with_history;
 use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
+use crate::metrics::metrics_collector::MetricsCollector;
 
 #[derive(Debug)]
 pub enum AppCommand {

@@ -204,7 +204,7 @@ impl MetricsCollector {
 
     pub async fn start_request(&self, operation: String) -> String {
         let timing = RequestTiming::new(operation.clone());
-        let request_id = format!("{}_{}", Utc::timestamp_millis(&Utc::now()), uuid::Uuid::new_v4());
+        let request_id = format!("{}_{}", Utc::now().timestamp_millis(), uuid::Uuid::new_v4());
         
         let mut timings = self.request_timings.write().await;
         timings.insert(request_id.clone(), timing);
@@ -261,7 +261,7 @@ impl MetricsCollector {
     }
 
     pub async fn get_request_summary(&self) -> String {
-        let metrics = self.metrics.read().await;
+        let metrics = futures::executor::block_on(self.metrics.read());
         format!(
             "Requests: {}, Success Rate: {:.1}%, Avg Time: {:.2}ms, Active: {}",
             metrics.request_count,
@@ -293,7 +293,7 @@ impl MetricsCollector {
 
     pub async fn save_historical_data_to_file(&self) -> Result<(), String> {
         let historical = self.historical_data.read().await;
-        let data = serde_json::to_string(&historical).map_err(|e| e.to_string())?;
+        let data = serde_json::to_string(&*historical)?;
         let file_path = self.data_dir.join("historical_metrics.json");
         fs::write(&file_path, data).map_err(|e| e.to_string())
     }

@@ -56,7 +56,7 @@ pub enum Mode {
     Create,
     Workflow,
     InteractiveChat,
-    Dashboard,
+    Mode::Dashboard => todo!(),
 }
 
 impl App {
@@ -451,7 +451,7 @@ impl App {
                 // Render performance metrics if available
                 if let Some(metrics_ref) = &self.metrics {
                     if let Ok(mut metrics_guard) = metrics_ref.lock() {
-                        let metrics_summary = metrics_guard.get_request_summary().await;
+                        let metrics_summary = metrics_guard.get_request_summary_sync();
                         let metrics_block = Block::default()
                             .borders(Borders::ALL)
                             .title("📊 Performance Metrics")
@@ -514,6 +514,9 @@ impl App {
                 let text = Text::from("Workflow mode UI functions are not available. Please use other modes.");
                 let para = Paragraph::new(text).block(block);
                 f.render_widget(para, area);
+            }
+            Mode::Dashboard => {
+    // TODO: implement dashboard rendering
             }
         }
     }

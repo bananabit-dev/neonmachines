@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ratatui::prelude::{Style, Stylize, Color, Rect, Alignment};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap, Gauge, BarChart};
+use ratatui::text::Line;
 
 // Re-export historical data types from metrics_collector
 pub use crate::metrics::metrics_collector::{
@@ -68,7 +69,8 @@ impl PerformanceMetrics {
 
     pub fn update_derived_metrics(&mut self) {
         if self.request_count > 0 {
-            self.average_response_time = Duration::from_millis((self.total_duration.as_millis() / self.request_count) as u64);
+            let avg = (self.total_duration.as_millis() / self.request_count as u128) as u64;
+            self.average_response_time = Duration::from_millis(avg);
         }
 
         // Update requests per second
@@ -245,7 +247,7 @@ pub mod charts {
         let error_rate = metrics.get_error_rate();
         
         let bars = vec![
-            Bar::new("Success", (success_rate * 100.0) as u64)
+            Bar::default().value((success_rate * 100.0) as u64).label("Success".into())
                 .style(Style::default().fg(Color::Green)),
             Bar::new("Error", (error_rate * 100.0) as u64)
                 .style(Style::default().fg(Color::Red)),
@@ -256,7 +258,7 @@ pub mod charts {
             .bar_width(10)
             .bar_style(Style::default().fg(Color::White))
             .value_style(Style::default().fg(Color::Yellow).bold())
-            .bars(&bars)
+            .data(&bars)
     }
 
     /// Render a line chart for requests per second (simplified bar chart representation)
@@ -271,7 +273,7 @@ pub mod charts {
             .bar_width(15)
             .bar_style(Style::default().fg(Color::White))
             .value_style(Style::default().fg(Color::Yellow).bold())
-            .bars(&bars)
+            .data(&bars)
     }
 
     /// Render response time metrics as a paragraph with styling
@@ -396,7 +398,7 @@ pub mod charts {
             .bar_width(8)
             .bar_style(Style::default().fg(Color::White))
             .value_style(Style::default().fg(Color::Yellow).bold())
-            .bars(&bars)
+            .data(&bars)
     }
 
     /// Render historical performance summary
@@ -486,7 +488,7 @@ pub mod charts {
     }
 
     /// Export options for historical data
-    pub fn export_options(area: Rect) -> Paragraph {
+    pub fn export_options(area: Rect) -> Paragraph<'static> {
         let mut spans = Vec::new();
         spans.push(Span::styled("Export Options: ", Style::default().fg(Color::White).bold()));
         spans.push(Span::raw("[J]son | [C]SV | [S]ave to file | [L]oad from file"));
