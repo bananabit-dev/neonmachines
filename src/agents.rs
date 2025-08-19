@@ -480,11 +480,11 @@ pub struct ChainedAgent {
 
 impl ChainedAgent {
     pub fn new(
-        agent: Box<dyn Agent>,
-        next: i32,
         id: i32,
+        agent: Box<dyn Agent>,
         max_iterations: usize,
         iteration_delay_ms: u64,
+        next: Option<i32>,
         tx: UnboundedSender<AppEvent>,
         shared_history: SharedHistory,
     ) -> Self {
@@ -492,10 +492,9 @@ impl ChainedAgent {
             inner: agent,
             next,
             id,
-            max_iterations,
-            iteration_delay_ms,
             tx,
             shared_history,
+            history: Vec::new(),
         }
     }
 }

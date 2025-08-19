@@ -203,7 +203,7 @@ fn parse_nm_single(s: &str) -> std::io::Result<WorkflowConfig> {
                 let agent_type = if ty.contains("Parallel") {
                     AgentType::ParallelAgent
                 } else if ty.contains("Validator") {
-                    AgentType::ValidatorAgent
+                    AgentType::Validator
                 } else {
                     AgentType::Agent
                 };

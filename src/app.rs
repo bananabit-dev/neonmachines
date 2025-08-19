@@ -23,6 +23,7 @@ pub enum Mode {
     Create,
     Workflow,
     Dashboard,
+    InteractiveChat,
 }
 
 pub struct App {

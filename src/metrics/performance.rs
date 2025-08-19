@@ -1,8 +1,7 @@
 use ratatui::text::{Line, Span};
 use ratatui::style::{Style, Color, Modifier};
-use ratatui::widgets::{Block, Borders, Gauge as RatatuiGauge, Paragraph, Wrap, BarChart as RatatuiBarChart, Bar};
+use ratatui::widgets::{Block, Borders, Gauge as RatatuiGauge, Paragraph, Wrap, BarChart as RatatuiBarChart};
 use ratatui::layout::{Rect, Alignment};
-use ratatui::prelude::Stylize;
 use chrono::{DateTime, Utc, Duration};
 use std::time;
 
@@ -197,7 +196,7 @@ pub fn generate_alerts(metrics: &PerformanceMetrics) -> Vec<PerformanceAlert> {
 /// Chart rendering functions for performance dashboard
 pub mod charts {
     use super::*;
-    use ratatui::widgets::{Gauge, BarChart, Bar};
+    use ratatui::widgets::{Gauge, BarChart};
     
     /// Render a gauge widget for CPU usage
     pub fn cpu_gauge(metrics: &PerformanceMetrics, _area: Rect) -> Gauge {
@@ -207,7 +206,7 @@ pub mod charts {
         RatatuiGauge::default()
             .block(Block::default().borders(Borders::ALL).title("CPU Usage"))
             .gauge_style(Style::default().fg(Color::Blue))
-            .set_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+            .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
             .ratio(percentage / 100.0)
             .label(label)
     }
@@ -220,7 +219,7 @@ pub mod charts {
         RatatuiGauge::default()
             .block(Block::default().borders(Borders::ALL).title("Memory Usage"))
             .gauge_style(Style::default().fg(Color::Green))
-            .set_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+            .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
             .ratio(percentage / 100.0)
             .label(label)
     }
@@ -230,15 +229,9 @@ pub mod charts {
         let success_rate = metrics.get_success_rate();
         let error_rate = metrics.get_error_rate();
         
-        let bars = vec![
-            Bar::default()
-                .label("Success".into())
-                .value((success_rate * 100.0) as u64)
-                .style(Style::default().fg(Color::Green)),
-            Bar::default()
-                .label("Error".into())
-                .value((error_rate * 100.0) as u64)
-                .style(Style::default().fg(Color::Red)),
+        let data = vec![
+            ("Success", (success_rate * 100.0) as u64),
+            ("Error", (error_rate * 100.0) as u64),
         ];
 
         RatatuiBarChart::default()
@@ -246,16 +239,13 @@ pub mod charts {
             .bar_width(10)
             .bar_style(Style::default().fg(Color::White))
             .value_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .data(bars.as_slice())
+            .data(&data)
     }
 
     /// Render a line chart for requests per second (simplified bar chart representation)
     pub fn requests_per_second_chart(metrics: &PerformanceMetrics, _area: Rect) -> BarChart {
-        let bars = vec![
-            Bar::default()
-                .label("RPS".into())
-                .value(metrics.requests_per_second as u64)
-                .style(Style::default().fg(Color::Cyan)),
+        let data = vec![
+            ("RPS", metrics.requests_per_second as u64),
         ];
 
         RatatuiBarChart::default()
@@ -263,7 +253,7 @@ pub mod charts {
             .bar_width(15)
             .bar_style(Style::default().fg(Color::Blue))
             .value_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .data(bars.as_slice())
+            .data(&data)
     }
 
     /// Render response time metrics as a paragraph with styling
@@ -370,22 +360,34 @@ pub mod charts {
             }
         }
 
-        // Convert to bars for display (simplified representation)
-        let bars: Vec<Bar> = intervals
+        // Convert to data for display (simplified representation)
+        let data: Vec<(&str, u64)> = intervals
             .into_iter()
             .enumerate()
             .map(|(i, (_, response_time))| {
-                Bar::default()
-                    .label(format!("{}", i + 1).into())
-                    .value(response_time as u64)
-                    .style(Style::default().fg(Color::Magenta))
+                // Create static strings for labels - this is a workaround for now
+                match i {
+                    0 => ("1", response_time as u64),
+                    1 => ("2", response_time as u64),
+                    2 => ("3", response_time as u64),
+                    3 => ("4", response_time as u64),
+                    4 => ("5", response_time as u64),
+                    5 => ("6", response_time as u64),
+                    6 => ("7", response_time as u64),
+                    7 => ("8", response_time as u64),
+                    8 => ("9", response_time as u64),
+                    9 => ("10", response_time as u64),
+                    10 => ("11", response_time as u64),
+                    11 => ("12", response_time as u64),
+                    _ => ("", response_time as u64),
+                }
             })
             .collect();
 
         RatatuiBarChart::default()
             .block(Block::default().borders(Borders::ALL).title("Historical Response Times (Last Hour)"))
             .bar_width(8)
-            .data(bars.as_slice())
+            .data(&data)
     }
 
     /// Render historical performance summary

@@ -14,6 +14,10 @@ pub enum AppCommand {
         cfg: crate::nm_config::WorkflowConfig,
         start_agent: Option<i32>,
     },
+    ShowHistory {
+        agent_index: Option<i32>,
+        workflow_name: String,
+    },
 }
 
 pub enum AppEvent {
@@ -26,6 +30,15 @@ pub enum AppEvent {
 
 pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, metrics: Option<Arc<Mutex<MetricsCollector>>>) {
     match cmd {
+        AppCommand::ShowHistory { agent_index, workflow_name } => {
+            // Handle history display
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Showing history for workflow '{}', agent {:?}",
+                workflow_name, agent_index
+            )));
+            // TODO: Implement actual history retrieval
+            let _ = log_tx.send(AppEvent::RunResult("History display not yet implemented".to_string()));
+        }
         AppCommand::RunWorkflow { workflow_name, prompt, cfg, start_agent } => {
             let _ = log_tx.send(AppEvent::RunStart(workflow_name.clone()));
             let _ = log_tx.send(AppEvent::Log(format!(
@@ -71,6 +84,9 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
                             files.clone(),
                             cfg.model.clone(),
                             cfg.temperature,
+                            row.max_iterations,
+                            log_tx.clone(),
+                            shared_history.clone(),
                         ),
                         row.on_success.unwrap_or(-1),
                         row.on_failure.unwrap_or(-1),
@@ -81,6 +97,9 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
                         files.clone(),
                         cfg.model.clone(),
                         cfg.temperature,
+                        row.max_iterations,
+                        log_tx.clone(),
+                        shared_history.clone(),
                     ))
                 };
 
