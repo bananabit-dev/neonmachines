@@ -218,7 +218,7 @@ async fn run_tui(cli: Cli) -> Result<()> {
     let metrics_collector = Arc::new(Mutex::new(crate::metrics::metrics_collector::MetricsCollector::new()));
     
     let (tx_cmd, _rx_cmd) = mpsc::unbounded_channel();
-    let (tx_evt, rx_evt) = mpsc::unbounded_channel();
+    let (_tx_evt, rx_evt) = mpsc::unbounded_channel();
     
     let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));
     
@@ -322,7 +322,7 @@ async fn run_command(cli: Cli) -> Result<()> {
                 println!("Configuration not yet implemented.");
             }
         }
-        Some(cli::Commands::Extension { list, install, uninstall, update, extension_type }) => {
+        Some(cli::Commands::Extension { list, install, uninstall, update, extension_type: _ }) => {
             let (tx, _) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
             
             if *list {

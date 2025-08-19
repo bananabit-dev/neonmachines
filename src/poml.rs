@@ -52,7 +52,7 @@ impl PomlExecutor {
         let _ = self.tx.send(AppEvent::Log(format!("Executing: {}", command_str)));
 
         // Spawn the command
-        let mut child = command
+        let child = command
             .spawn()
             .map_err(|e| {
                 let error_msg = format!("Failed to start poml-cli: {}", e);

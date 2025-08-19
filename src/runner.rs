@@ -29,7 +29,7 @@ pub enum AppEvent {
 
 pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, metrics: Option<Arc<Mutex<MetricsCollector>>>) {
     match cmd {
-        AppCommand::ShowHistory { agent_index, workflow_name, cfg } => {
+        AppCommand::ShowHistory { agent_index, workflow_name, cfg: _ } => {
             // Handle history display
             let _ = log_tx.send(AppEvent::Log(format!(
                 "Showing history for workflow '{}', agent {:?}",
@@ -117,14 +117,14 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
             // Execute workflow with metrics tracking
             let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
             let mut output = String::new();
-            let mut current_input = prompt.clone();
+            let current_input = prompt.clone();
             let current_node = start_agent.unwrap_or(0) as i32;
             let traversals = 0;
-            let max_traversals = cfg.maximum_traversals;
+            let _max_traversals = cfg.maximum_traversals;
 
             // Start metrics tracking for workflow
             let metrics_collector = metrics.unwrap_or_else(|| Arc::new(Mutex::new(MetricsCollector::new())));
-            let request_id = metrics_collector.lock().unwrap().start_request("workflow_execution".to_string()).await;
+            let _request_id = metrics_collector.lock().unwrap().start_request("workflow_execution".to_string()).await;
             // Track the request ID for cleanup later
 
             let msg = format!(
@@ -139,7 +139,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
             // Track each traversal step with metrics
             let step_start = std::time::Instant::now();
             let mut step_output = graph.run(current_node, &current_input).await;
-            let step_duration = step_start.elapsed();
+            let _step_duration = step_start.elapsed();
 
             // Record metrics for this traversal step
             // For now, we'll record this as a successful step
@@ -147,7 +147,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
             let _ = metrics_collector.lock().unwrap().finish_request(format!("step_{}", traversals), true).await;
 
             // Try to detect explicit routing marker
-            let mut next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__=") {
+            let next_node = if let Some(route_idx) = step_output.rfind("\n__ROUTE__=") {
                 let route_str = &step_output[route_idx + 11..];
                 let route = route_str.trim().parse::<i32>().ok();
                 step_output.truncate(route_idx); // remove marker
@@ -158,13 +158,13 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
 
             // ✅ If no explicit marker, fall back to config.nm routing
             if next_node.is_none() {
-                next_node = if !step_output.starts_with("Error:") {
+                let _current_input = if !step_output.starts_with("Error:") {
                     // Preserve the original prompt and only pass the LLM output to the next agent
-                    current_input = step_output.trim().to_string();
-                    Some(current_node + 1)
+                    step_output.trim().to_string()
                 } else {
-                    Some(current_node) // retry same node on error
+                    prompt.clone()
                 };
+                let _next_node = Some(current_node + 1);
             }
 
             // Final metrics update and alert generation

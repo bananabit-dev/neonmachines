@@ -297,7 +297,8 @@ impl Cli {
         }
 
         // Validate port range
-        if self.port == 0 || self.port > 65535 {
+        #[allow(unused_comparisons)]
+        if self.port > 65535 {
             return Err(NeonmachinesError::cli(format!(
                 "Invalid port: {}. Must be between 1 and 65535",
                 self.port

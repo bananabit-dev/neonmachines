@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::UnboundedSender;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 
 /// Helper to define properties
 fn prop(typ: &str, desc: &str) -> Property {
