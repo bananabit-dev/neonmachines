@@ -11,7 +11,7 @@ pub fn handle_command(
     tx: &UnboundedSender<AppCommand>,
     messages: &mut Vec<ChatMessage>,
     selected_agent: &mut Option<usize>,
-    mode: &mut Mode, // ✅ allow switching modes
+    mode: &mut Mode, // Add this parameter
 ) {
     let mut it = line.split_whitespace();
     let cmd = it.next().unwrap_or("");
@@ -54,7 +54,7 @@ pub fn handle_command(
                             workflow_name: wf.name.clone(),
                             prompt: "Run all".into(),
                             cfg: wf,
-                            start_agent: *selected_agent,
+                            start_agent: selected_agent.map(|idx| idx as i32),
                         });
                     }
                     messages.push(ChatMessage {
@@ -74,7 +74,7 @@ pub fn handle_command(
                         workflow_name: cfg.name.clone(),
                         prompt: prompt.clone(),
                         cfg,
-                        start_agent: *selected_agent,
+                        start_agent: selected_agent.map(|idx| idx as i32),
                     });
                     *active_workflow = name.to_string();
                     messages.push(ChatMessage {
@@ -240,7 +240,7 @@ pub fn handle_command(
                     if let Ok(agent_idx) = arg.parse::<usize>() {
                         let _ = tx.send(AppCommand::ShowHistory {
                             workflow_name: active_workflow.clone(),
-                            agent_index: Some(agent_idx),
+                            agent_index: Some(agent_idx as i32),
                             cfg,
                         });
                         messages.push(ChatMessage {

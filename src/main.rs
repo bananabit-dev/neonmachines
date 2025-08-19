@@ -216,7 +216,7 @@ async fn run_tui(cli: Cli) -> Result<()> {
     // Initialize metrics collector for performance monitoring
     let metrics_collector = Arc::new(Mutex::new(crate::metrics::metrics_collector::MetricsCollector::new()));
     
-    let (tx_cmd, rx_cmd) = mpsc::unbounded_channel();
+    let (tx_cmd, _rx_cmd) = mpsc::unbounded_channel();
     let (tx_evt, rx_evt) = mpsc::unbounded_channel();
     
     let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));

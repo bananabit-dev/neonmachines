@@ -17,6 +17,7 @@ pub enum AppCommand {
     ShowHistory {
         agent_index: Option<i32>,
         workflow_name: String,
+        cfg: crate::nm_config::WorkflowConfig,
     },
 }
 
@@ -30,7 +31,7 @@ pub enum AppEvent {
 
 pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, metrics: Option<Arc<Mutex<MetricsCollector>>>) {
     match cmd {
-        AppCommand::ShowHistory { agent_index, workflow_name } => {
+        AppCommand::ShowHistory { agent_index, workflow_name, cfg } => {
             // Handle history display
             let _ = log_tx.send(AppEvent::Log(format!(
                 "Showing history for workflow '{}', agent {:?}",
@@ -77,7 +78,7 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
                     .map(|s| s.trim().to_string())
                     .collect();
 
-                let agent: Box<dyn llmgraph::models::graph::Agent> = if row.agent_type == crate::nm_config::AgentType::Validator {
+                let agent: Box<dyn llmgraph::models::graph::Agent + Send + Sync> = if row.agent_type == crate::nm_config::AgentType::Validator {
                     Box::new(crate::agents::PomlValidatorAgent::new(
                         crate::agents::PomlAgent::new(
                             &format!("ValidatorAgent{}", i + 1),
@@ -105,18 +106,16 @@ pub async fn run_workflow(cmd: AppCommand, log_tx: UnboundedSender<AppEvent>, me
 
                 // ✅ Pass shared_history into ChainedAgent
                 let chained = crate::agents::ChainedAgent::new(
-                    i,
+                    i as i32, // Convert usize index to i32 for the ID
                     agent,
-                    row.max_iterations,
-                    row.iteration_delay_ms,
-                    next_id,
                     log_tx.clone(),
-                    shared_history.clone(),
+                    next_id,
+                    row.max_iterations,      // Pass max_iterations
+                    row.iteration_delay_ms,  // Pass iteration_delay_ms
+                    shared_history.clone(),  // Pass shared_history
                 );
-
-                graph.add_node(i as i32, Box::new(chained));
-            }
-
+                graph.add_node(i as i32, Box::new(chained)); // Use i as i32 for node ID
+}
             // Execute workflow with metrics tracking
             let _ = log_tx.send(AppEvent::Log("Starting workflow execution...".to_string()));
             let mut output = String::new();

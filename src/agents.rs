@@ -479,17 +479,18 @@ pub struct ChainedAgent {
 }
 
 impl ChainedAgent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: i32,
-        agent: Box<dyn Agent>,
-        max_iterations: usize,
-        iteration_delay_ms: u64,
-        next: Option<i32>,
+        id: i32, // Expecting i32
+        inner: Box<dyn Agent + Send + Sync>,
         tx: UnboundedSender<AppEvent>,
+        next: Option<i32>,
+        _max_iterations: usize, // Mark as unused
+        _iteration_delay_ms: u64, // Mark as unused
         shared_history: SharedHistory,
     ) -> Self {
         Self {
-            inner: agent,
+            inner,
             next,
             id,
             tx,

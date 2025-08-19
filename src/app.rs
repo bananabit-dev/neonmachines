@@ -102,17 +102,21 @@ impl App {
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 return true; // Quit
             }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('l'), modifiers: KeyModifiers::CONTROL, .. }) => {
+                // Clear screen with Ctrl+L
+                self.scroll_offset = 0;
+            }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
+                if !crossterm::event::KeyModifiers::CONTROL.contains(crossterm::event::KeyModifiers::CONTROL) {
+                    self.insert_char(c);
+                }
+            }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, .. }) => {
                 // ✅ Insert newline instead of submitting
                 self.insert_char('\n');
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
                 self.submit();
-            }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
-                if !crossterm::event::KeyModifiers::CONTROL.contains(crossterm::event::KeyModifiers::CONTROL) {
-                    self.insert_char(c);
-                }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
                 self.backspace();
@@ -153,10 +157,6 @@ impl App {
                         }
                     }
                 }
-            }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('l'), modifiers: KeyModifiers::CONTROL, .. }) => {
-                // Clear screen with Ctrl+L
-                self.scroll_offset = 0;
             }
             _ => {}
         }
@@ -203,37 +203,40 @@ impl App {
     }
 
     pub fn submit(&mut self) {
-        let line = self.input.clone();
-        self.input.clear();
-        self.cursor_g = 0;
-        
-        // ✅ Treat the entire input (even multi-line) as one message
-        self.add_message("you", line.clone());
-        
-        if line.starts_with('/') {
-            handle_command(
-                &mut self.mode, // ✅ pass mode so /create can switch
-                &self.workflows,
-                &self.active_workflow,
-                &line,
-                &mut self.messages,
-                &self.tx,
-            );
+    let line = self.input.clone();
+    self.input.clear();
+
+    // ✅ Treat the entire input (even multi-line) as one message
+    self.add_message("you", line.clone());
+
+    if line.starts_with('/') {
+        // Pass the correct arguments including selected_agent and mutable mode reference
+        handle_command(
+            &line,
+            &mut self.workflows,
+            &mut self.active_workflow,
+            &self.tx,
+            &mut self.messages,
+            &mut self.selected_agent, // Pass the mutable reference
+            &mut self.mode,          // Pass the mutable mode reference
+        );
+    } else {
+        // ... (rest of the else block for non-command input)
+        if let Some(cfg) = self.workflows.get(&self.active_workflow) {
+            // Convert Option<usize> to Option<i32> before sending
+            let start_agent_i32: Option<i32> = self.selected_agent.map(|i| i as i32);
+            let _ = self.tx.send(AppCommand::RunWorkflow {
+                workflow_name: cfg.name.clone(),
+                prompt: line.clone(),
+                cfg: cfg.clone(),
+                start_agent: start_agent_i32, // Use the converted value
+            });
+            self.add_message("system", format!("Running workflow '{}' with prompt: {}", cfg.name, line));
         } else {
-            if let Some(cfg) = self.workflows.get(&self.active_workflow) {
-                let start_agent = self.selected_agent.map(|i| i as i32);
-                let _ = self.tx.send(AppCommand::RunWorkflow {
-                    workflow_name: cfg.name.clone(),
-                    prompt: line.clone(),
-                    cfg: cfg.clone(),
-                    start_agent,
-                });
-                self.add_message("system", format!("Running workflow '{}' with prompt: {}", cfg.name, line));
-            } else {
-                self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
-            }
+            self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
         }
     }
+}
 
     pub fn render(&self, f: &mut Frame) {
         let chunks = Layout::default()

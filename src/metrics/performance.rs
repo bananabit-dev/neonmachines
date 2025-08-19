@@ -326,9 +326,9 @@ pub mod charts {
         let now = Utc::now();
         let one_hour_ago = now - Duration::hours(1);
         
-        let recent_data: Vec<&crate::metrics::metrics_collector::HistoricalEntry> = historical_data.entries
+        let recent_data: Vec<&crate::metrics::metrics_collector::HistoricalEntry> = historical_data.get_entries()
             .iter()
-            .filter(|entry| entry.timestamp >= one_hour_ago)
+            .filter(|entry| *entry.timestamp() >= one_hour_ago)
             .collect();
 
         if recent_data.is_empty() {
@@ -346,14 +346,14 @@ pub mod charts {
             
             let interval_data: Vec<&crate::metrics::metrics_collector::HistoricalEntry> = recent_data
                 .iter()
-                .filter(|entry| entry.timestamp >= current_interval_start && entry.timestamp < interval_end)
+                .filter(|entry| *entry.timestamp() >= current_interval_start && *entry.timestamp() < interval_end)
                 .cloned()
                 .collect();
                 
             if !interval_data.is_empty() {
                 let avg_response_time: f64 = interval_data
                     .iter()
-                    .map(|e| e.metrics.average_response_time.num_milliseconds() as f64)
+                    .map(|e| e.metrics().average_response_time.num_milliseconds() as f64)
                     .sum::<f64>() / interval_data.len() as f64;
                     
                 intervals.push((current_interval_start, avg_response_time));

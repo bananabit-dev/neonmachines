@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use uuid;
 use futures;
+use serde::{Serialize, Deserialize};
 
 /// Time range for historical data queries
 #[derive(Debug, Clone, PartialEq)]
@@ -24,12 +25,30 @@ pub enum ExportFormat {
 }
 
 /// Historical performance data entry
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)] // Add derives
 pub struct HistoricalEntry {
-    pub timestamp: DateTime<Utc>,
-    pub operation: String,
-    pub success: bool,
-    pub metrics: PerformanceMetrics,
+    timestamp: DateTime<Utc>,
+    metrics: PerformanceMetrics,
+    operation: String,
+    success: bool,
+}
+
+impl HistoricalEntry {
+    pub fn timestamp(&self) -> &DateTime<Utc> {
+        &self.timestamp
+    }
+    
+    pub fn metrics(&self) -> &PerformanceMetrics {
+        &self.metrics
+    }
+    
+    pub fn operation(&self) -> &str {
+        &self.operation
+    }
+    
+    pub fn success(&self) -> bool {
+        self.success
+    }
 }
 
 /// Summary statistics for historical data
@@ -48,9 +67,9 @@ pub struct HistoricalSummary {
 }
 
 /// Historical performance data storage
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)] // Add derives
 pub struct HistoricalPerformanceData {
-    pub entries: Vec<HistoricalEntry>,
+    entries: Vec<HistoricalEntry>,
     max_entries: usize,
 }
 
@@ -108,7 +127,7 @@ impl HistoricalPerformanceData {
         }
 
         let total_requests = filtered_entries.iter().map(|e| e.metrics.request_count).sum();
-        let total_duration_ms = filtered_entries.iter().map(|e| e.metrics.total_duration.num_milliseconds() as u64).sum();
+        let _total_duration_ms: u64 = filtered_entries.iter().map(|e| e.metrics.total_duration.num_milliseconds() as u64).sum();
         let success_count = filtered_entries.iter().map(|e| e.metrics.success_count).sum();
         let error_count = total_requests - success_count;
         let average_response_time_ms = filtered_entries.iter().map(|e| e.metrics.average_response_time.num_milliseconds() as f64).sum::<f64>() / filtered_entries.len() as f64;
@@ -178,6 +197,10 @@ impl HistoricalPerformanceData {
     pub async fn clear(&mut self) {
         self.entries.clear();
     }
+
+    pub fn get_entries(&self) -> &Vec<HistoricalEntry> {
+        &self.entries
+    }
 }
 
 impl Default for HistoricalPerformanceData {
@@ -186,7 +209,7 @@ impl Default for HistoricalPerformanceData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceMetrics {
     pub request_count: u64,
     pub success_count: u64,
