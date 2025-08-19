@@ -4,8 +4,8 @@ use std::io::{Read, Write};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentType {
     Agent,
+    Validator, // Add this missing variant
     ParallelAgent,
-    ValidatorAgent,
 }
 
 #[derive(Debug, Clone)]

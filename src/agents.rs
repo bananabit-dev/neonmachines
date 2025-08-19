@@ -166,15 +166,16 @@ impl PomlAgent {
             files,
             model,
             temperature,
+            original_prompt: None,
+            latest_user_input: None,
+            history: vec![],
             max_iterations,
             iteration_delay_ms: 200,
             tx,
-            original_prompt: None,
-            latest_user_input: None,
             shared_history,
-            history: Vec::new(),
         }
     }
+
 
     fn load_system_message(&self, user_input: &str, last_output: &str) -> Message {
         let mut system_content = String::new();
@@ -479,23 +480,25 @@ pub struct ChainedAgent {
 
 impl ChainedAgent {
     pub fn new(
-        inner: Box<dyn Agent>,
-        next: Option<i32>,
+        agent: Box<dyn Agent>,
+        next: i32,
         id: i32,
+        max_iterations: usize,
+        iteration_delay_ms: u64,
         tx: UnboundedSender<AppEvent>,
-        shared_history: SharedHistory, // ✅ pass in
+        shared_history: SharedHistory,
     ) -> Self {
         Self {
-            inner,
+            inner: agent,
             next,
             id,
+            max_iterations,
+            iteration_delay_ms,
             tx,
-            history: Vec::new(),
             shared_history,
         }
     }
 }
-
 #[async_trait]
 impl Agent for ChainedAgent {
     async fn run(

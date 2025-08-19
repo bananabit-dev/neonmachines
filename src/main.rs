@@ -20,6 +20,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use app::App;
+use std::collections::HashMap; // Add this import
 use nm_config::{load_all_nm, preset_workflows};
 use runner::{run_workflow, AppCommand, AppEvent};
 use tui::{restore_terminal, setup_terminal};
