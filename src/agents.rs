@@ -57,7 +57,7 @@ fn inject_let_variables_in_file(
     // Process each <let> tag and replace content if we have a replacement
     processed = re.replace_all(&processed, |caps: &regex::Captures| {
         let name = caps.get(1).unwrap().as_str();
-        let existing_content = caps.get(2).unwrap().as_str();
+        let _existing_content = caps.get(2).unwrap().as_str();
         
         // Check if we have a replacement for this variable
         if let Some(new_content) = replacements.get(name) {
@@ -263,11 +263,11 @@ impl Agent for PomlAgent {
             let parts: Vec<&str> = entry.splitn(3, ':').collect();
             if parts.len() == 3 {
                 let file = parts[2].trim();
-                let vars = HashMap::new();
-                if let Some(user_input) = &self.latest_user_input {
+                let _vars = HashMap::new();
+                if let Some(_user_input) = &self.latest_user_input {
                     let _ = crate::agents::inject_let_variables_in_file(
                         file,
-                        &vars,
+                        &_vars,
                         Some(&processed_input), // ✅ use processed input
                         None,
                         &self.tx,
@@ -365,10 +365,10 @@ impl Agent for PomlAgent {
                     let parts: Vec<&str> = entry.splitn(3, ':').collect();
                     if parts.len() == 3 {
                         let file = parts[2].trim();
-                        let vars = HashMap::new();
+                        let _vars = HashMap::new();
                         let _ = inject_let_variables_in_file(
                             file,
-                            &vars,
+                            &_vars,
                             None,
                             Some(&final_output), // ✅ only nmoutput
                             &self.tx,

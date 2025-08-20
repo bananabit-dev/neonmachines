@@ -3,7 +3,8 @@ use crate::tools::builtin_tools_with_history;
 use llmgraph::Graph;
 use tokio::sync::mpsc::UnboundedSender;
 use crate::metrics::metrics_collector::MetricsCollector;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub enum AppCommand {
     RunWorkflow {
@@ -126,7 +127,7 @@ pub async fn run_workflow(
 
             let metrics_collector = metrics.unwrap_or_else(|| Arc::new(Mutex::new(MetricsCollector::new())));
             let _request_id = metrics_collector
-                .lock().unwrap()
+                .lock().await
                 .start_request("workflow_execution".to_string()).await;
 
             while traversals < max_traversals {
@@ -143,7 +144,7 @@ pub async fn run_workflow(
                 let _step_duration = step_start.elapsed();
 
                 let _ = metrics_collector
-                    .lock().unwrap()
+                    .lock().await
                     .finish_request(format!("step_{}", traversals), true).await;
 
                 // Log step result
@@ -174,8 +175,8 @@ pub async fn run_workflow(
             }
 
             // ✅ Final metrics + alerts
-            let final_metrics = metrics_collector.lock().unwrap().get_metrics().await;
-            let alerts = metrics_collector.lock().unwrap().get_alerts().await;
+            let final_metrics = metrics_collector.lock().await.get_metrics().await;
+            let alerts = metrics_collector.lock().await.get_alerts().await;
 
             for alert in alerts {
                 let _ = log_tx.send(AppEvent::Log(format!(

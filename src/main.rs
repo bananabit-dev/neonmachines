@@ -18,7 +18,7 @@ mod workflow_ui;
 use color_eyre::Result;
 use crossterm::event;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -30,6 +30,7 @@ use tui::{restore_terminal, setup_terminal};
 use cli::{AppMode, Cli};
 use poml::handle_poml_execution;
 use nmmcp::{load_all_extensions, get_extensions_directory};
+use runner::run_workflow;
 
 // Import logging modules
 use tracing::{error, warn, info, instrument};
@@ -215,8 +216,10 @@ async fn run_tui(cli: Cli) -> Result<()> {
         .map(|name| name.clone())
         .unwrap_or_else(|| "default".to_string());
     
-    // Initialize metrics collector for performance monitoring
-    let metrics_collector = Arc::new(Mutex::new(crate::metrics::metrics_collector::MetricsCollector::new()));
+    // ✅ Use tokio::sync::Mutex for async safety
+    let metrics_collector = Arc::new(tokio::sync::Mutex::new(
+        crate::metrics::metrics_collector::MetricsCollector::new(),
+    ));
     
     // ✅ Create command + event channels
     let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel();
@@ -226,12 +229,18 @@ async fn run_tui(cli: Cli) -> Result<()> {
     let metrics_clone = metrics_collector.clone();
     tokio::spawn(async move {
         while let Some(cmd) = rx_cmd.recv().await {
-            run_workflow(cmd, tx_evt.clone(), metrics_clone.clone()).await;
+            run_workflow(cmd, tx_evt.clone(), Some(metrics_clone.clone())).await;
         }
     });
     
     // ✅ Pass tx_cmd + rx_evt into App
-    let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));
+    let mut app = App::new(
+        tx_cmd.clone(),
+        rx_evt,
+        workflows,
+        active_name,
+        Some(metrics_collector.clone()),
+    );
     
     // Set up signal handling for graceful shutdown
     let (tx_signal, mut rx_signal) = tokio::sync::oneshot::channel::<()>();
@@ -275,6 +284,7 @@ async fn run_tui(cli: Cli) -> Result<()> {
     restore_terminal(terminal)?;
     Ok(())
 }
+
 
 async fn run_web(cli: Cli) -> Result<()> {
     info!("Starting web interface on http://{}:{}/", cli.get_host(), cli.get_port());

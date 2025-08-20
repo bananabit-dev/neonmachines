@@ -9,7 +9,8 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::layout::{Layout, Constraint, Position, Rect};
 use ratatui::Frame;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_segmentation::UnicodeSegmentation;
@@ -346,7 +347,7 @@ impl App {
 
         let current_line_index = self.get_current_line_index();
         if current_line_index > 0 {
-            let target_line = &lines[current_line_index - 1];
+            let _target_line = &lines[current_line_index - 1];
             let current_col_in_line = self.get_current_column_in_line();
             
             // Move to same column in previous line, or end of line if column is beyond
@@ -365,7 +366,7 @@ impl App {
 
         let current_line_index = self.get_current_line_index();
         if current_line_index < lines.len() - 1 {
-            let target_line = &lines[current_line_index + 1];
+            let _target_line = &lines[current_line_index + 1];
             let current_col_in_line = self.get_current_column_in_line();
             
             // Move to same column in next line, or end of line if column is beyond
@@ -415,9 +416,9 @@ impl App {
         let current_line_index = self.get_current_line_index();
         let current_line = lines[current_line_index];
         
-        let mut line_pos = 0;
+        let _line_pos = 0;
         for (i, _) in current_line.grapheme_indices(true) {
-            if self.cursor_g == line_pos + (if current_line_index < lines.len() - 1 { 1 } else { 0 }) + i {
+            if self.cursor_g == _line_pos + (if current_line_index < lines.len() - 1 { 1 } else { 0 }) + i {
                 return i;
             }
         }
@@ -584,7 +585,7 @@ impl App {
                 f.render_widget(input, input_area);
                 
                 // Enhanced cursor positioning with visual feedback using helper methods
-                let lines: Vec<&str> = self.input.split('\n').collect();
+                let _lines: Vec<&str> = self.input.split('\n').collect();
                 let current_line = self.get_current_line_index() as u16;
                 let current_col = self.get_current_column_in_line() as u16;
                 let cx = input_area.x + 2 + current_col; // +2 for padding (block borders)
@@ -635,7 +636,8 @@ impl App {
         // Only update metrics every 500ms to avoid excessive lock contention
         if self.last_metrics_update.elapsed() >= Duration::from_millis(500) {
             if let Some(metrics_ref) = &self.metrics_collector {
-                if let Ok(metrics_guard) = metrics_ref.lock() {
+                // Use try_lock to avoid blocking, and skip if lock is unavailable
+                if let Ok(metrics_guard) = metrics_ref.try_lock() {
                     self.cached_metrics_text = metrics_guard.get_request_summary_sync();
                     self.last_metrics_update = Instant::now();
                 }
