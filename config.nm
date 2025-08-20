@@ -1,3 +1,17 @@
+workflow:code_generator
+model:z-ai/glm-4.5-air:free
+temperature:0.7
+maximum_traversals:20
+working_dir:.
+agent_1: Agent
+files:"role:system:code_generator.poml;role:user:code_request_with_todo.poml"
+maximum_iterations:10
+iteration_delay_ms:200
+on_success:0
+on_failure:0
+
+====
+
 workflow:tset
 model:qwen/qwen3-coder:free
 temperature:0.7
@@ -8,6 +22,26 @@ files:"role:system:code_generator.poml"
 maximum_iterations:20
 iteration_delay_ms:3000
 on_success:0
+on_failure:0
+
+====
+
+workflow:security_check
+model:z-ai/glm-4.5-air:free
+temperature:0.7
+maximum_traversals:5
+working_dir:.
+agent_1: Agent
+files:"role:system:security_check.poml;role:user:get_files.poml"
+maximum_iterations:20
+iteration_delay_ms:500
+on_success:1
+on_failure:0
+agent_2: Validator
+files:"role:system:validate_security_check.poml"
+maximum_iterations:20
+iteration_delay_ms:500
+on_success:-1
 on_failure:0
 
 ====
@@ -37,37 +71,3 @@ maximum_iterations:3
 iteration_delay_ms:200
 on_success:-1
 on_failure:-1
-
-====
-
-workflow:code_generator
-model:z-ai/glm-4.5-air:free
-temperature:0.7
-maximum_traversals:20
-working_dir:.
-agent_1: Agent
-files:"role:system:code_generator.poml;role:user:code_request_with_todo.poml"
-maximum_iterations:10
-iteration_delay_ms:200
-on_success:0
-on_failure:0
-
-====
-
-workflow:security_check
-model:z-ai/glm-4.5-air:free
-temperature:0.7
-maximum_traversals:5
-working_dir:.
-agent_1: Agent
-files:"role:system:security_check.poml;role:user:get_files.poml"
-maximum_iterations:20
-iteration_delay_ms:500
-on_success:1
-on_failure:0
-agent_2: Validator
-files:"role:system:validate_security_check.poml"
-maximum_iterations:20
-iteration_delay_ms:500
-on_success:-1
-on_failure:0

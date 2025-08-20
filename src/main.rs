@@ -194,7 +194,6 @@ async fn main() -> Result<()> {
     }
 }
 
-// In main.rs, fix the run_workflow call:
 async fn run_tui(cli: Cli) -> Result<()> {
     let mut terminal = setup_terminal()?;
     
@@ -219,9 +218,19 @@ async fn run_tui(cli: Cli) -> Result<()> {
     // Initialize metrics collector for performance monitoring
     let metrics_collector = Arc::new(Mutex::new(crate::metrics::metrics_collector::MetricsCollector::new()));
     
-    let (tx_cmd, _rx_cmd) = mpsc::unbounded_channel();
-    let (_tx_evt, rx_evt) = mpsc::unbounded_channel();
+    // ✅ Create command + event channels
+    let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel();
+    let (tx_evt, rx_evt) = mpsc::unbounded_channel();
+
+    // ✅ Spawn background task to handle commands
+    let metrics_clone = metrics_collector.clone();
+    tokio::spawn(async move {
+        while let Some(cmd) = rx_cmd.recv().await {
+            run_workflow(cmd, tx_evt.clone(), metrics_clone.clone()).await;
+        }
+    });
     
+    // ✅ Pass tx_cmd + rx_evt into App
     let mut app = App::new(tx_cmd.clone(), rx_evt, workflows, active_name, Some(metrics_collector.clone()));
     
     // Set up signal handling for graceful shutdown
@@ -246,7 +255,7 @@ async fn run_tui(cli: Cli) -> Result<()> {
         terminal.draw(|f| app.render(f))?;
         
         // Handle events with non-blocking approach using event queue
-        if let Ok(ev) = event::poll(Duration::from_millis(33)) { // Reduced to ~30fps for better performance
+        if let Ok(ev) = event::poll(Duration::from_millis(33)) { // ~30fps
             if ev {
                 let ev = event::read()?;
                 app.queue_event(ev); // Queue event instead of processing immediately
