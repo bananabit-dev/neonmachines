@@ -155,6 +155,15 @@ impl App {
                     Mode::Create => {
                         self.handle_create_submit();
                     }
+                    Mode::Workflow => {
+                        // Select the current workflow and exit workflow mode
+                        if self.workflow_index < self.workflow_list.len() {
+                            let selected_workflow = self.workflow_list[self.workflow_index].clone();
+                            self.add_message("system", format!("Selected workflow: '{}'", selected_workflow));
+                            self.active_workflow = selected_workflow;
+                        }
+                        self.mode = Mode::Chat;
+                    }
                     Mode::Options => {
                         self.handle_options_submit();
                     }
