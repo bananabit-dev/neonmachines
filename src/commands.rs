@@ -380,54 +380,53 @@ pub fn handle_command(
 }
 
 fn help_command_fullscreen() -> String {
-    r#"┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                                                                         │
-│  🚀 NEONMACHINES - AI WORKFLOW ORCHESTRATION FRAMEWORK                                                                                │
-│                                                                                                                                         │
-│  📋 AVAILABLE COMMANDS:                                                                                                                │
-│                                                                                                                                         │
-│  /cwd [path]          - Show or set working directory                                                                                   │
-│  /run [workflow|all] [prompt] - Run a workflow or all workflows                                                                        │
-│  /save                - Save all workflows to config.nm                                                                                 │
-│  /create [name]       - Create or edit a workflow                                                                                      │
-│  /workflow            - Enter workflow selection mode                                                                                   │
-│  /options             - Enter options mode for poml template input                                                                       │
-│  /chat                - Enter interactive chat mode                                                                                     │
-│  /agent [number|none|list] - Select agent for routing                                                                                    │
-│  /history [agent|all] - Show execution history                                                                                         │
-│  /trace [on|off|show] - Enable/disable/view tracing                                                                                    │
-│  /help                - Show this help message (you're here!)                                                                          │
-│                                                                                                                                         │
-│  🎮 NAVIGATION:                                                                                                                        │
-│  Enter - Submit message                                                                                                                 │
-│  Shift+Enter - Insert newline                                                                                                           │
-│  Ctrl+C or Ctrl+D - Quit                                                                                                                │
-│  Ctrl+L - Clear screen                                                                                                                  │
-│  Tab - Command completion                                                                                                               │
-│                                                                                                                                         │
-│  💡 EXAMPLES:                                                                                                                           │
-│  /run myworkflow "Process this data"                                                                                                   │
-│  /agent 2 - Select agent 2 for routing                                                                                                  │
-│  /agent none - Use default routing                                                                                                      │
-│  /create newworkflow - Create new workflow named 'newworkflow'                                                                           │
-│  /options - Enter options mode for poml template input                                                                                  │
-│  /trace on - Enable API call tracing                                                                                                    │
-│                                                                                                                                         │
-│  🔄 WORKFLOW MODE:                                                                                                                     │
-│  - Press LEFT/RIGHT arrows to navigate between workflows                                                                               │
-│  - Press Enter to select a workflow                                                                                                    │
-│  - Press Esc to exit workflow mode                                                                                                      │
-│                                                                                                                                         │
-│  🎨 CREATE MODE:                                                                                                                       │
-│  - Use arrow keys to navigate fields                                                                                                   │
-│  - Press Enter to submit changes                                                                                                        │
-│  - Press Esc to exit create mode                                                                                                       │
-│                                                                                                                                         │
-│  Press any key to continue...                                                                                                           │
-│                                                                                                                                         │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-"#.to_string()
+    let help_text = r#"
+🚀 NEONMACHINES - AI WORKFLOW ORCHESTRATION FRAMEWORK
+
+📋 AVAILABLE COMMANDS:
+
+/cwd [path]          - Show or set working directory
+/run [workflow|all] [prompt] - Run a workflow or all workflows
+/save                - Save all workflows to config.nm
+/create [name]       - Create or edit a workflow
+/workflow            - Enter workflow selection mode
+/options             - Enter options mode for poml template input
+/chat                - Enter interactive chat mode
+/agent [number|none|list] - Select agent for routing
+/history [agent|all] - Show execution history
+/trace [on|off|show] - Enable/disable/view tracing
+/help                - Show this help message (you're here!)
+
+🎮 NAVIGATION:
+Enter - Submit message
+Shift+Enter - Insert newline
+Ctrl+C or Ctrl+D - Quit
+Ctrl+L - Clear screen
+Tab - Command completion
+
+💡 EXAMPLES:
+/run myworkflow "Process this data"
+/agent 2 - Select agent 2 for routing
+/agent none - Use default routing
+/create newworkflow - Create new workflow named 'newworkflow'
+/options - Enter options mode for poml template input
+/trace on - Enable API call tracing
+
+🔄 WORKFLOW MODE:
+- Press LEFT/RIGHT arrows to navigate between workflows
+- Press Enter to select a workflow
+- Press Esc to exit workflow mode
+
+🎨 CREATE MODE:
+- Use arrow keys to navigate fields
+- Press Enter to submit changes
+- Press Esc to exit create mode
+
+Press any key to continue...
+"#;
+    help_text.to_string()
 }
+
 
 fn help_command(messages: &mut Vec<ChatMessage>) {
     let help_text = r#"
