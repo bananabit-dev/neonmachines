@@ -1,104 +1,76 @@
-pub mod api;
-use crate::web::api::handlers;
+use warp::ws::{Message, WebSocket};
+use futures_util::stream::StreamExt;
+use futures_util::sink::SinkExt;
+use tokio::sync::{mpsc, Mutex};
+use crate::app::App;
+use crate::runner::{AppEvent};
+use crate::nm_config::{load_all_nm, preset_workflows};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use color_eyre::Result;
-use tokio::signal;
-use tracing::info;
-use warp::Filter;
+pub async fn handle_websocket_connection(ws: WebSocket) {
+    let (mut tx, mut rx) = ws.split();
 
-use crate::state::AppState;
-
-pub async fn start_web_server(
-    addr: std::net::SocketAddr,
-    app_state: AppState,
-) -> Result<()> {
-    info!("Starting web server on {}", addr);
-
-    // CORS support
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_headers(vec!["content-type"])
-        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"]);
-
-    // API routes
-    let graph_api = {
-        let app_state = app_state.clone();
-        warp::path("api")
-            .and(warp::path("graph"))
-            .and(warp::get())
-            .and_then(move || handlers::placeholder_handler(app_state.clone()))
-    };
-
-
-    // Static files
-    let static_files = warp::path("static")
-        .and(warp::fs::dir("web/static"));
-
-    // Root route - serve index.html
-    let index = warp::path::end()
-        .and(warp::fs::file("web/index.html"));
-
-    let poml_api = {
-        let app_state = app_state.clone();
-        warp::path("api")
-            .and(warp::path("poml"))
-            .and(warp::get())
-            .and_then(move || handlers::placeholder_handler(app_state.clone()))
-    };
-
-    // Combine all routes that can produce rejections
-
-    let poml_validate_api = warp::path!("api" / "poml" / "validate")
-        .and(warp::post())
-        .and(warp::body::json())
-        .and_then(handlers::validate_poml_handler);
-
-    let all_routes = api::routes(app_state.clone())
-        .or(graph_api)
-        .or(poml_api)
-        .or(poml_validate_api)
-        .or(static_files)
-        .or(index)
-        .or(warp::path("graph").and(warp::fs::file("web/graph-editor.html")))
-        .or(warp::path("poml").and(warp::fs::file("web/poml-editor.html")));
-
-    // Apply CORS and the rejection handler to all routes
-    let routes = all_routes
-        .with(cors)
-        .recover(api::handle_rejection);
-
-    // Start the server
-    warp::serve(routes)
-        .run(addr)
-        .await;
-
-    Ok(())
-}
-
-pub async fn shutdown_signal() {
-    info!("Shutdown signal received");
-
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+    // Create App instance
+    let loaded_workflows = load_all_nm().unwrap_or_else(|_| preset_workflows());
+    let mut workflows = HashMap::new();
+    for wf in loaded_workflows {
+        workflows.insert(wf.name.clone(), wf.clone());
     }
+    let active_name = workflows.keys().next().map(|name| name.clone()).unwrap_or_else(|| "default".to_string());
+    let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel();
+    let (tx_evt, mut rx_evt) = mpsc::unbounded_channel();
+    let metrics_collector = Arc::new(tokio::sync::Mutex::new(crate::metrics::metrics_collector::MetricsCollector::new()));
+    let app = Arc::new(Mutex::new(App::new(tx_cmd, rx_evt, workflows, active_name, Some(metrics_collector.clone()))));
 
-    info!("Shutdown complete");
+    // Task to handle runner commands
+    tokio::spawn(async move {
+        while let Some(cmd) = rx_cmd.recv().await {
+            crate::runner::run_workflow(cmd, tx_evt.clone(), Some(metrics_collector.clone())).await;
+        }
+    });
+
+    // Task to send events to the client
+    let (ws_tx, mut ws_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(message) = ws_rx.recv().await {
+            if tx.send(message).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Task to handle incoming messages
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        while let Some(result) = rx.next().await {
+            if let Ok(msg) = result {
+                if msg.is_text() {
+                    let text = msg.to_str().unwrap();
+                    let mut app = app_clone.lock().await;
+                    app.input = text.to_string();
+                    app.submit();
+                }
+            }
+        }
+    });
+
+    // Main event loop for this connection
+    loop {
+        let mut app = app.lock().await;
+        tokio::select! {
+            Some(event) = app.rx.recv() => {
+                let msg = match event {
+                    AppEvent::Log(line) => Message::text(format!("[LOG] {}", line)),
+                    AppEvent::RunStart(name) => Message::text(format!("[RUN_START] {}", name)),
+                    AppEvent::RunResult(line) => Message::text(format!("[RUN_RESULT] {}", line)),
+                    AppEvent::RunEnd(name) => Message::text(format!("[RUN_END] {}", name)),
+                    AppEvent::Error(line) => Message::text(format!("[ERROR] {}", line)),
+                };
+                if ws_tx.send(msg).is_err() {
+                    break;
+                }
+            }
+        }
+    }
 }

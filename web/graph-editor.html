@@ -7,9 +7,60 @@
     <link rel="stylesheet" href="static/css/main.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Graph Editor</h1>
-        <p>This is the graph editor page.</p>
+    <div class="graph-editor-container">
+        <div class="graph-toolbar">
+            <div class="tool-group">
+                <button class="tool-btn" id="add-node-btn" title="Add Node">
+                    <span class="tool-icon">+</span>
+                </button>
+                <button class="tool-btn" id="connect-btn" title="Connect Nodes">
+                    <span class="tool-icon">🔗</span>
+                </button>
+                <button class="tool-btn" id="delete-btn" title="Delete">
+                    <span class="tool-icon">🗑️</span>
+                </button>
+                <button class="tool-btn" id="save-graph-btn" title="Save Graph">
+                    <span class="tool-icon">💾</span>
+                </button>
+                <button class="tool-btn" id="load-graph-btn" title="Load Graph">
+                    <span class="tool-icon">📁</span>
+                </button>
+            </div>
+            <div class="tool-group">
+                <button class="tool-btn" id="zoom-in-btn" title="Zoom In">
+                    <span class="tool-icon">🔍+</span>
+                </button>
+                <button class="tool-btn" id="zoom-out-btn" title="Zoom Out">
+                    <span class="tool-icon">🔍-</span>
+                </button>
+                <button class="tool-btn" id="reset-view-btn" title="Reset View">
+                    <span class="tool-icon">🔄</span>
+                </button>
+            </div>
+        </div>
+        <div class="graph-canvas-container">
+            <svg id="graph-canvas" class="graph-canvas">
+                <defs>
+                    <marker id="arrowhead-success" markerWidth="10" markerHeight="7" 
+                            refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="green" />
+                    </marker>
+                    <marker id="arrowhead-failure" markerWidth="10" markerHeight="7" 
+                            refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="red" />
+                    </marker>
+                </defs>
+                <g id="graph-connections"></g>
+                <g id="graph-nodes"></g>
+            </svg>
+        </div>
+        <div class="graph-properties">
+            <h3>Node Properties</h3>
+            <div id="node-properties-panel">
+                <p class="placeholder-text">Select a node to edit its properties</p>
+            </div>
+        </div>
     </div>
+    <script src="static/js/graph-editor.js"></script>
 </body>
 </html>

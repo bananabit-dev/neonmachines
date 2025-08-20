@@ -10,22 +10,22 @@ mod cli;
 mod poml;
 mod rate_limiter;
 mod error;
-mod metrics;
+
 mod nmmcp;
 mod create_ui;
 mod workflow_ui;
 mod state;
-
 mod web;
+mod metrics;
+
 use color_eyre::Result;
 use crossterm::event;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-
 use app::App;
-use std::collections::HashMap; // Add this import
+use std::collections::HashMap;
 use nm_config::{load_all_nm, preset_workflows};
 use runner::AppEvent;
 use tui::{restore_terminal, setup_terminal};
@@ -33,28 +33,32 @@ use cli::{AppMode, Cli};
 use poml::handle_poml_execution;
 use nmmcp::{load_all_extensions, get_extensions_directory};
 use runner::run_workflow;
-
-// Import logging modules
 use tracing::{error, warn, info, instrument};
 use tracing_appender::{non_blocking, rolling};
+use warp::Filter;
+use serde::Serialize;
+use std::time::Instant;
 
 
+static START_TIME: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
 
-/// Initialize logging based on CLI configuration
+#[derive(Serialize)]
+struct Metrics {
+    uptime: String,
+    memory_usage: String,
+    cpu_usage: String,
+}
+
+
 #[instrument]
 fn init_logging(cli: &Cli) -> Result<()> {
     let _level_filter = cli.get_tracing_level();
-
-    // Create file writer for rolling logs
     let file_appender = if let Some(log_file) = &cli.log_file {
         rolling::daily("logs", log_file)
     } else {
         rolling::daily("logs", "neonmachines.log")
     };
-
     let (_non_blocking, guard) = non_blocking(file_appender);
-
-    // Set up tracing subscriber to write to both file and stdout
     tracing_subscriber::fmt()
         .compact()
         .with_target(false)
@@ -63,16 +67,11 @@ fn init_logging(cli: &Cli) -> Result<()> {
         .with_writer(std::io::stdout)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-
-    // Set up file logging in a separate subscriber
     tracing::info!("Logging initialized with level: {}", cli.log_level);
     if let Some(log_file) = &cli.log_file {
         tracing::info!("Logs will be written to: {}", log_file.display());
     }
-
-    // Keep the guard alive by storing it in a global location
     std::mem::forget(guard);
-
     Ok(())
 }
 
@@ -103,18 +102,12 @@ impl Default for Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-
-    // Parse command line arguments manually for now
     let args: Vec<String> = std::env::args().collect();
     let mut cli = Cli::default();
-    
-    // Handle simple flags
     cli.web = args.contains(&"--web".to_string());
     cli.config = args.contains(&"--config".to_string());
     cli.verbose = args.contains(&"--verbose".to_string());
     cli.experimental = args.contains(&"--experimental".to_string());
-    
-    // Handle values
     for (i, arg) in args.iter().enumerate() {
         match arg.as_str() {
             "--port" if i + 1 < args.len() => {
@@ -148,29 +141,21 @@ async fn main() -> Result<()> {
             _ => {}
         }
     }
-
-    // Initialize logging
     info!("Starting Neonmachines v{}", env!("CARGO_PKG_VERSION"));
-    
-    // Validate CLI configuration
     if let Err(e) = cli.validate() {
         error!("CLI validation failed: {}", e);
         eprintln!("Configuration error: {}", e);
         return Err(e.into());
     }
-    
     if let Err(e) = init_logging(&cli) {
         error!("Failed to initialize logging: {}", e);
         eprintln!("Failed to initialize logging: {}", e);
         return Err(e.into());
     }
-
-    // Handle POML file execution if specified
     if let Some(poml_file) = &cli.poml_file {
         info!("Executing POML file: {}", poml_file.display());
         let (tx_evt, _) = mpsc::unbounded_channel::<AppEvent>();
         let working_dir = cli.working_dir.clone();
-        
         match handle_poml_execution(poml_file, working_dir, tx_evt).await {
             Ok(_) => {
                 info!("POML execution completed successfully");
@@ -183,18 +168,12 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
-
-    // Initialize rate limiter if enabled
     if cli.enable_rate_limit {
         info!("Rate limiting enabled with limit: {} requests/minute", cli.rate_limit);
         println!("Rate limiting enabled with limit: {} requests/minute", cli.rate_limit);
-        // Initialize rate limiter here
     }
-
-    // Determine mode based on CLI arguments
     let mode = cli.get_mode();
     info!("Running in {:?} mode", mode);
-    
     match mode {
         AppMode::Web => run_web(cli).await,
         AppMode::Config => run_config(cli).await,
@@ -205,43 +184,29 @@ async fn main() -> Result<()> {
 
 async fn run_tui(cli: Cli) -> Result<()> {
     let mut terminal = setup_terminal()?;
-    
-    // Set up logging
     let log_file = cli.log_file.clone().unwrap_or_else(|| PathBuf::from("neonmachines.log"));
     println!("Logging to file: {}", log_file.display());
-    
-    // Load all workflows
     let loaded_workflows = load_all_nm().unwrap_or_else(|_| preset_workflows());
     let mut workflows = HashMap::new();
     for wf in loaded_workflows {
         workflows.insert(wf.name.clone(), wf.clone());
     }
-    
-    // Pick the first workflow as active
     let active_name = workflows
         .keys()
         .next()
         .map(|name| name.clone())
         .unwrap_or_else(|| "default".to_string());
-    
-    // ✅ Use tokio::sync::Mutex for async safety
     let metrics_collector = Arc::new(tokio::sync::Mutex::new(
         crate::metrics::metrics_collector::MetricsCollector::new(),
     ));
-    
-    // ✅ Create command + event channels
     let (tx_cmd, mut rx_cmd) = mpsc::unbounded_channel();
     let (tx_evt, rx_evt) = mpsc::unbounded_channel();
-
-    // ✅ Spawn background task to handle commands
     let metrics_clone = metrics_collector.clone();
     tokio::spawn(async move {
         while let Some(cmd) = rx_cmd.recv().await {
             run_workflow(cmd, tx_evt.clone(), Some(metrics_clone.clone())).await;
         }
     });
-    
-    // ✅ Pass tx_cmd + rx_evt into App
     let mut app = App::new(
         tx_cmd.clone(),
         rx_evt,
@@ -249,67 +214,79 @@ async fn run_tui(cli: Cli) -> Result<()> {
         active_name,
         Some(metrics_collector.clone()),
     );
-    
-    // Load command history from file
     if let Err(e) = app.load_history_from_file() {
         println!("Warning: Could not load command history: {}", e);
     } else {
         println!("Loaded {} commands from history", app.command_history.len());
     }
-    
-    // Set up signal handling for graceful shutdown
     let (tx_signal, mut rx_signal) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
         let _ = tx_signal.send(());
     });
-    
-    // Main event loop with non-blocking design
     loop {
-        // Check for shutdown signal
         if let Ok(()) = rx_signal.try_recv() {
             app.add_message("system", "Received shutdown signal...".to_string());
             break;
         }
-        
-        // Update cached metrics (non-blocking)
         app.update_cached_metrics();
-        
-        // Render the UI
         terminal.draw(|f| app.render(f))?;
-        
-        // Handle events with non-blocking approach using event queue
-        if let Ok(ev) = event::poll(Duration::from_millis(33)) { // ~30fps
+        if let Ok(ev) = event::poll(Duration::from_millis(33)) {
             if ev {
                 let ev = event::read()?;
-                app.queue_event(ev); // Queue event instead of processing immediately
+                app.queue_event(ev);
             }
         }
-        
-        // Process all queued events (non-blocking)
         if app.process_events() {
-            break; // Quit signal received
+            break;
         }
-        
-        // Process async events (non-blocking)
         app.poll_async().await;
     }
-    
     app.persist_on_exit();
     restore_terminal(terminal)?;
     Ok(())
 }
-
 
 async fn run_web(cli: Cli) -> Result<()> {
     info!("Starting web interface on http://{}:{}/", cli.get_host(), cli.get_port());
     println!("🚀 Starting Neonmachines Web Interface");
     println!("📍 URL: http://{}:{}/", cli.get_host(), cli.get_port());
 
-    let app_state = crate::state::AppState::new();
-    let addr = format!("{}:{}", cli.get_host(), cli.get_port()).parse()?;
+    let _app_state = crate::state::AppState::new();
+    let addr = format!("{}:{}", cli.get_host(), cli.get_port());
 
-    crate::web::start_web_server(addr, app_state).await
+    let ws_route = warp::path("ws")
+        .and(warp::ws())
+        .map(|ws: warp::ws::Ws| {
+            ws.on_upgrade(move |socket| web::handle_websocket_connection(socket))
+        });
+
+    let static_files = warp::fs::dir("web");
+
+    let root = warp::get()
+        .and(warp::path::end())
+        .and(warp::fs::file("web/index.html"));
+
+    let create_route = warp::get()
+        .and(warp::path("create"))
+        .and(warp::path::end())
+        .and(warp::fs::file("web/graph-editor.html"));
+
+    let metrics_route = warp::path!("api" / "metrics")
+        .map(|| {
+            let metrics = Metrics {
+                uptime: format!("{:.2?}", START_TIME.elapsed()),
+                memory_usage: "N/A".to_string(), // Placeholder
+                cpu_usage: "N/A".to_string(),    // Placeholder
+            };
+            warp::reply::json(&metrics)
+        });
+
+    let routes = root.or(create_route).or(ws_route).or(static_files).or(metrics_route);
+
+    warp::serve(routes).run(addr.parse::<std::net::SocketAddr>()?).await;
+
+    Ok(())
 }
 
 async fn run_config(cli: Cli) -> Result<()> {
@@ -325,44 +302,30 @@ async fn run_config(cli: Cli) -> Result<()> {
 async fn run_command(cli: Cli) -> Result<()> {
     match &cli.command {
         Some(cli::Commands::Poml { file, working_dir, output, provider, temperature, max_tokens, log_level, save }) => {
-            // Execute POML using external poml-cli (python -m poml)
             let mut command = tokio::process::Command::new("python");
             command.arg("-m").arg("poml");
-            
-            // Add the POML file
             command.arg("-f").arg(file.display().to_string());
-            
-            // Add working directory if specified
             if let Some(working_dir) = working_dir {
                 command.current_dir(working_dir);
             }
-            
-            // Add optional parameters if provided
             if let Some(provider) = provider {
                 command.arg("--provider").arg(provider);
             }
             if let Some(output_path) = output {
                 command.arg("--output").arg(output_path.display().to_string());
             }
-            
             command.arg("--temperature").arg(temperature.to_string());
             command.arg("--max-tokens").arg(max_tokens.to_string());
             command.arg("--log-level").arg(log_level);
-            
             if *save {
                 command.arg("--save");
             }
-            
-            // Execute the command
             info!("Executing POML file with external CLI: {:?}", command);
-            
             let command_output = command.output().await?;
-            
             if command_output.status.success() {
                 info!("POML execution successful");
                 println!("POML execution successful:");
                 println!("{}", String::from_utf8_lossy(&command_output.stdout));
-                
                 if *save {
                     println!("Results saved to output file as requested");
                 }
@@ -385,7 +348,6 @@ async fn run_command(cli: Cli) -> Result<()> {
         }
         Some(cli::Commands::Extension { list, install, uninstall, update, extension_type: _ }) => {
             let (tx, _) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
-            
             if *list {
                 println!("Loading extensions...");
                 match load_all_extensions(tx.clone()).await {
@@ -405,25 +367,18 @@ async fn run_command(cli: Cli) -> Result<()> {
                     }
                 }
             }
-            
             if let Some(install_path) = install {
                 println!("Installing extension from: {}", install_path.display());
-                // Implementation would go here
                 println!("Extension installation not yet implemented");
             }
-            
             if let Some(uninstall_name) = uninstall {
                 println!("Uninstalling extension: {}", uninstall_name);
-                // Implementation would go here
                 println!("Extension uninstallation not yet implemented");
             }
-            
             if *update {
                 println!("Updating extensions...");
-                // Implementation would go here
                 println!("Extension update not yet implemented");
             }
-            
             if !(*list || install.is_some() || uninstall.is_some() || *update) {
                 println!("Extension management commands:");
                 println!("  --list          List all available extensions");
@@ -440,13 +395,11 @@ async fn run_command(cli: Cli) -> Result<()> {
                 println!("Extensions: NMMCP (NeonMachines Model Control Protocol)");
                 println!("Tools: Terminal execution, POML workflow execution");
             }
-            
             if *extensions {
                 println!("Extension System: NMMCP");
                 println!("Extensions Directory: {}", get_extensions_directory().display());
                 println!("Status: Ready for extension loading");
             }
-            
             if *themes {
                 println!("Available Themes: default, dark, light");
             }
@@ -454,10 +407,8 @@ async fn run_command(cli: Cli) -> Result<()> {
         Some(cli::Commands::Test { provider, extensions, quick }) => {
             if *provider {
                 println!("Testing provider connections...");
-                // Implementation would go here
                 println!("Provider testing not yet implemented");
             }
-            
             if *extensions {
                 println!("Testing extensions...");
                 match load_all_extensions(tokio::sync::mpsc::unbounded_channel().0).await {
@@ -469,7 +420,6 @@ async fn run_command(cli: Cli) -> Result<()> {
                     }
                 }
             }
-            
             if *quick {
                 println!("Running quick test...");
                 println!("✓ CLI parsing");
@@ -487,14 +437,12 @@ async fn run_command(cli: Cli) -> Result<()> {
 }
 
 async fn is_poml_available() -> bool {
-    // Check if python is available
     match tokio::process::Command::new("python")
         .arg("--version")
         .output()
         .await
     {
         Ok(_) => {
-            // Check if poml module is available
             match tokio::process::Command::new("python")
                 .arg("-m")
                 .arg("poml")

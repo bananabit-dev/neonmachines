@@ -12,6 +12,7 @@ use std::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, Duration};
 use regex::Regex;
+use tracing::{info, warn, debug, error, instrument};
 
 /// Validation result structure for explicit validation responses
 #[derive(Debug, Deserialize, Serialize)]
@@ -229,6 +230,7 @@ impl PomlAgent {
 
 #[async_trait]
 impl Agent for PomlAgent {
+    #[instrument(skip(self, tool_registry))]
     async fn run(
         &mut self,
         input: &str,
@@ -313,6 +315,7 @@ impl Agent for PomlAgent {
             // Initialize circuit breaker
             let mut circuit_breaker = CircuitBreaker::new(5, std::time::Duration::from_secs(60));
             
+            info!("Generating AI response with model: {}", self.model);
             let resp = generate_with_retry(
                 base_url.clone(),
                 api_key.clone(),

@@ -66,6 +66,7 @@ tower_governor = "0.4"
 thiserror = "1.0"
 dirs = "5.0"
 warp = "0.3"
+futures-util = "0.3.31"
 
 [[bin]]
 name = "neonmachines"
@@ -80,3 +81,5 @@ panic = "abort"
 [profile.dev]
 opt-level = 0
 debug = true
+warp = "0.3"
+futures-util = "0.3"
