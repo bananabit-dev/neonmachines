@@ -1,3 +1,3 @@
-<poml>
+<let name="nminput">user: Hi </let>\n<poml>
     <folder src="files" showContent="true" />
 </poml>

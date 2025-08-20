@@ -1,3 +1,4 @@
+
 use crate::commands::handle_command;
 use crate::nm_config::{WorkflowConfig, save_all_nm, AgentType, AgentRow};
 use crate::runner::{AppCommand, AppEvent};
@@ -36,7 +37,7 @@ pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
     pub cursor_g: usize,
-    pub scroll_offset: usize,
+    pub messages_scroll: u16,
     pub is_running: bool,
     pub spinner_status: String,
     pub last_spinner_tick: Instant,
@@ -54,6 +55,9 @@ pub struct App {
     pub cached_metrics_text: String,
     pub last_metrics_update: Instant,
     pub event_queue: VecDeque<crossterm::event::Event>,
+    pub command_history: Vec<String>,
+    pub history_index: usize,
+    pub saved_input: String,
 }
 
 impl App {
@@ -75,7 +79,7 @@ impl App {
             }],
             input: String::new(),
             cursor_g: 0,
-            scroll_offset: 0,
+            messages_scroll: 0,
             is_running: true,
             spinner_status: String::new(),
             last_spinner_tick: Instant::now(),
@@ -93,6 +97,9 @@ impl App {
             cached_metrics_text: "No metrics data".to_string(),
             last_metrics_update: Instant::now(),
             event_queue: VecDeque::new(),
+            command_history: Vec::new(),
+            history_index: 0,
+            saved_input: String::new(),
         }
     }
 
@@ -100,6 +107,9 @@ impl App {
     pub fn persist_on_exit(&self) {
         let all: Vec<WorkflowConfig> = self.workflows.values().cloned().collect();
         let _ = save_all_nm(&all);
+        
+        // Save command history
+        let _ = self.save_history_to_file();
     }
 
     pub fn tick_spinner(&mut self) {
@@ -119,7 +129,7 @@ impl App {
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('l'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 // Clear screen with Ctrl+L
-                self.scroll_offset = 0;
+                self.messages_scroll = 0;
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 // Ctrl+D to quit (alternative to Ctrl+C)
@@ -225,6 +235,21 @@ impl App {
                     Mode::Create => {
                         self.handle_create_up();
                     }
+                    Mode::Chat => {
+                        // Navigate command history up
+                        if !self.command_history.is_empty() {
+                            if self.history_index == 0 {
+                                // Save current input before going to history
+                                self.saved_input = self.input.clone();
+                            }
+                            if self.history_index < self.command_history.len() {
+                                self.history_index += 1;
+                                let history_index = self.command_history.len() - self.history_index;
+                                self.input = self.command_history[history_index].clone();
+                                self.cursor_g = self.input.graphemes(true).count();
+                            }
+                        }
+                    }
                     _ => {
                         self.move_cursor_up();
                     }
@@ -234,6 +259,20 @@ impl App {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_down();
+                    }
+                    Mode::Chat => {
+                        // Navigate command history down
+                        if self.history_index > 0 {
+                            self.history_index -= 1;
+                            if self.history_index == 0 {
+                                // Restore saved input
+                                self.input = self.saved_input.clone();
+                            } else {
+                                let history_index = self.command_history.len() - self.history_index;
+                                self.input = self.command_history[history_index].clone();
+                            }
+                            self.cursor_g = self.input.graphemes(true).count();
+                        }
                     }
                     _ => {
                         self.move_cursor_down();
@@ -290,9 +329,11 @@ impl App {
 
     pub fn add_message(&mut self, from: &'static str, text: String) {
         self.messages.push(ChatMessage { from, text });
-        if self.messages.len() > 0 {
-            self.scroll_offset = self.messages.len().saturating_sub(1);
+        if self.messages.len() > 100 { // Keep the message list from growing indefinitely
+            self.messages.remove(0);
         }
+        // Auto-scroll to show the latest message
+        self.messages_scroll = self.messages.len() as u16;
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -381,7 +422,7 @@ impl App {
     /// Handle paste content properly for multi-line text
     pub fn insert_paste_content(&mut self, content: &str) {
         // Normalize line endings to \n for consistent handling
-        let normalized_content = content.replace("\r\n", "\n").replace('\r', "\n");
+        let normalized_content = content.replace("\n", "\n").replace('\r', "\n");
         
         // Find the position to insert
         let bi = byte_idx_for_g(&self.input, self.cursor_g);
@@ -450,6 +491,9 @@ impl App {
         self.add_message("you", line.clone());
 
         if line.starts_with('/') {
+            // Add command to history
+            self.add_to_history(&line);
+            
             // Pass the correct arguments including selected_agent and mutable mode reference
             handle_command(
                 &line,
@@ -542,7 +586,7 @@ impl App {
                         .title("💬 Messages")
                         .title_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)))
                     .wrap(Wrap { trim: false })
-                    .scroll((self.scroll_offset as u16, 0));
+                    .scroll((self.messages_scroll, 0));
                 f.render_widget(para, main_area);
                 
                 // Render performance metrics if available using cached text
@@ -978,6 +1022,77 @@ impl App {
         if !self.options_input.is_empty() {
             self.options_input.pop();
         }
+    }
+
+    /// Add command to history
+    pub fn add_to_history(&mut self, command: &str) {
+        if !command.trim().is_empty() {
+            // Remove duplicates from history
+            self.command_history.retain(|cmd| cmd != command);
+            // Add to history
+            self.command_history.push(command.to_string());
+            // Keep only last 50 commands
+            if self.command_history.len() > 50 {
+                self.command_history.remove(0);
+            }
+            // Reset history index
+            self.history_index = 0;
+            self.saved_input.clear();
+        }
+    }
+
+    /// Save command history to file
+    pub fn save_history_to_file(&self) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Write;
+        
+        let home_dir = dirs::home_dir().ok_or(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find home directory",
+        ))?;
+        
+        let history_file = home_dir.join(".neonmachines_history");
+        let mut file = File::create(history_file)?;
+        
+        for cmd in &self.command_history {
+            writeln!(file, "{}", cmd)?;
+        }
+        
+        Ok(())
+    }
+
+    /// Load command history from file
+    pub fn load_history_from_file(&mut self) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Read;
+        
+        let home_dir = dirs::home_dir().ok_or(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find home directory",
+        ))?;
+        
+        let history_file = home_dir.join(".neonmachines_history");
+        let mut file = match File::open(&history_file) {
+            Ok(file) => file,
+            Err(_) => return Ok(()), // File doesn't exist, that's fine
+        };
+        
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        
+        // Split into lines and filter out empty lines
+        let commands: Vec<String> = content
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .map(|line| line.to_string())
+            .collect();
+        
+        self.command_history = commands;
+        self.history_index = 0;
+        self.saved_input.clear();
+        
+        Ok(())
     }
 }
 

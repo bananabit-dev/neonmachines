@@ -14,7 +14,9 @@ mod metrics;
 mod nmmcp;
 mod create_ui;
 mod workflow_ui;
+mod state;
 
+mod web;
 use color_eyre::Result;
 use crossterm::event;
 use std::path::PathBuf;
@@ -36,6 +38,8 @@ use runner::run_workflow;
 use tracing::{error, warn, info, instrument};
 use tracing_appender::{non_blocking, rolling};
 
+
+
 /// Initialize logging based on CLI configuration
 #[instrument]
 fn init_logging(cli: &Cli) -> Result<()> {
@@ -48,9 +52,9 @@ fn init_logging(cli: &Cli) -> Result<()> {
         rolling::daily("logs", "neonmachines.log")
     };
 
-    let (_non_blocking, _guard) = non_blocking(file_appender);
+    let (_non_blocking, guard) = non_blocking(file_appender);
 
-    // Set up tracing subscriber
+    // Set up tracing subscriber to write to both file and stdout
     tracing_subscriber::fmt()
         .compact()
         .with_target(false)
@@ -60,10 +64,14 @@ fn init_logging(cli: &Cli) -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    info!("Logging initialized with level: {}", cli.log_level);
+    // Set up file logging in a separate subscriber
+    tracing::info!("Logging initialized with level: {}", cli.log_level);
     if let Some(log_file) = &cli.log_file {
-        info!("Logs will be written to: {}", log_file.display());
+        tracing::info!("Logs will be written to: {}", log_file.display());
     }
+
+    // Keep the guard alive by storing it in a global location
+    std::mem::forget(guard);
 
     Ok(())
 }
@@ -242,6 +250,13 @@ async fn run_tui(cli: Cli) -> Result<()> {
         Some(metrics_collector.clone()),
     );
     
+    // Load command history from file
+    if let Err(e) = app.load_history_from_file() {
+        println!("Warning: Could not load command history: {}", e);
+    } else {
+        println!("Loaded {} commands from history", app.command_history.len());
+    }
+    
     // Set up signal handling for graceful shutdown
     let (tx_signal, mut rx_signal) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
@@ -290,21 +305,11 @@ async fn run_web(cli: Cli) -> Result<()> {
     info!("Starting web interface on http://{}:{}/", cli.get_host(), cli.get_port());
     println!("🚀 Starting Neonmachines Web Interface");
     println!("📍 URL: http://{}:{}/", cli.get_host(), cli.get_port());
-    println!("🎨 Theme: {}", cli.theme);
-    if let Some(avatar) = &cli.avatar {
-        println!("🖼️ Avatar: {}", avatar.display());
-    }
-    println!();
-    println!("⚠️  Web interface is currently under development.");
-    println!("📝 For now, starting in TUI mode instead.");
-    println!();
-    
-    // Initialize logging for web mode
-    let log_file = cli.log_file.clone().unwrap_or_else(|| PathBuf::from("neonmachines.log"));
-    println!("📄 Logging to file: {}", log_file.display());
-    
-    // Start TUI mode instead
-    run_tui(cli).await
+
+    let app_state = crate::state::AppState::new();
+    let addr = format!("{}:{}", cli.get_host(), cli.get_port()).parse()?;
+
+    crate::web::start_web_server(addr, app_state).await
 }
 
 async fn run_config(cli: Cli) -> Result<()> {

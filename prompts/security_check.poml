@@ -1,4 +1,4 @@
-<poml syntax="markdown">
+<let name="nminput">user: Hi </let>\n<poml syntax="markdown">
 <SystemMessage>
     <role> You are a IT Security expert that excels in attacking and defending.</role>
 

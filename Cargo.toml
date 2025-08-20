@@ -24,6 +24,9 @@ filetime = "0.2.25"
 regex = "1.11.1"
 chrono = { version = "0.4.41", features = ["serde"] }
 toml = "0.8.19"
+tempfile = "3.10.1"
+
+
 openai-api-rs = "4.0.7"
 anyhow = "1.0"
 tracing = "0.1"
@@ -32,7 +35,7 @@ notify = "6.1.1"
 glob = "0.3"
 base64 = "0.22"
 uuid = { version = "1.11", features = ["v4", "serde"] }
-tempfile = "3.14"
+
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 tower = "0.4"
@@ -62,6 +65,7 @@ ratelimit = "0.4.1"
 tower_governor = "0.4"
 thiserror = "1.0"
 dirs = "5.0"
+warp = "0.3"
 
 [[bin]]
 name = "neonmachines"
