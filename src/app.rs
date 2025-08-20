@@ -2,6 +2,7 @@ use crate::commands::handle_command;
 use crate::nm_config::{WorkflowConfig, save_all_nm, AgentType, AgentRow};
 use crate::runner::{AppCommand, AppEvent};
 use crate::create_ui;
+use crate::workflow_ui;
 use ratatui::text::{Line, Span};
 use ratatui::style::{Style, Color, Modifier};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -13,7 +14,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_segmentation::UnicodeSegmentation;
 use std::collections::VecDeque;
-use crossterm::event::Event;
 
 pub struct ChatMessage {
     pub from: &'static str,
@@ -25,6 +25,7 @@ pub enum Mode {
     Chat,
     Create,
     Workflow,
+    Options,
     Dashboard,
     InteractiveChat,
 }
@@ -46,6 +47,7 @@ pub struct App {
     pub workflow_index: usize,
     pub create_focus: usize,
     pub create_input: String,
+    pub options_input: String,
     pub selected_agent: Option<usize>,
     pub metrics_collector: Option<Arc<Mutex<crate::metrics::metrics_collector::MetricsCollector>>>,
     pub cached_metrics_text: String,
@@ -84,6 +86,7 @@ impl App {
             workflow_index,
             create_focus: 0,
             create_input: String::new(),
+            options_input: String::new(),
             selected_agent: None,
             metrics_collector,
             cached_metrics_text: "No metrics data".to_string(),
@@ -130,6 +133,13 @@ impl App {
                             self.handle_create_input(c);
                         }
                     }
+                    Mode::Workflow => {
+                        // Handle workflow mode input - ignore character input, only handle navigation
+                    }
+                    Mode::Options => {
+                        // Handle options mode input
+                        self.options_input.push(c);
+                    }
                     _ => {
                         // Handle regular character input - check if it's not a modifier key
                         self.insert_char(c);
@@ -145,6 +155,9 @@ impl App {
                     Mode::Create => {
                         self.handle_create_submit();
                     }
+                    Mode::Options => {
+                        self.handle_options_submit();
+                    }
                     _ => {
                         self.submit();
                     }
@@ -154,6 +167,9 @@ impl App {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_backspace();
+                    }
+                    Mode::Options => {
+                        self.handle_options_backspace();
                     }
                     _ => {
                         self.backspace();
@@ -165,6 +181,13 @@ impl App {
                     Mode::Create => {
                         self.handle_create_left();
                     }
+                    Mode::Workflow => {
+                        // Navigate left in workflow mode (previous workflow)
+                        if self.workflow_index > 0 {
+                            self.workflow_index -= 1;
+                            self.active_workflow = self.workflow_list[self.workflow_index].clone();
+                        }
+                    }
                     _ => {
                         self.move_cursor_left();
                     }
@@ -174,6 +197,13 @@ impl App {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_right();
+                    }
+                    Mode::Workflow => {
+                        // Navigate right in workflow mode (next workflow)
+                        if self.workflow_index < self.workflow_list.len() - 1 {
+                            self.workflow_index += 1;
+                            self.active_workflow = self.workflow_list[self.workflow_index].clone();
+                        }
                     }
                     _ => {
                         self.move_cursor_right();
@@ -201,10 +231,24 @@ impl App {
                 }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Esc, .. }) => {
-                if self.mode == Mode::Chat {
-                    self.add_message("system", "Exited interactive chat mode".to_string());
+                // Exit special modes
+                match self.mode {
+                    Mode::Create | Mode::Workflow | Mode::Options => {
+                        self.add_message("system", format!("Exited {} mode", match self.mode {
+                            Mode::Create => "create",
+                            Mode::Workflow => "workflow", 
+                            Mode::Options => "options",
+                            _ => "unknown"
+                        }));
+                        self.mode = Mode::Chat;
+                    }
+                    Mode::Chat => {
+                        // In chat mode, Esc does nothing or could clear input
+                    }
+                    _ => {
+                        self.mode = Mode::Chat;
+                    }
                 }
-                self.mode = Mode::Chat;
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
                 // Tab completion for commands
@@ -389,40 +433,40 @@ impl App {
     }
 
     pub fn submit(&mut self) {
-    let line = self.input.clone();
-    self.input.clear();
+        let line = self.input.clone();
+        self.input.clear();
 
-    // ✅ Treat the entire input (even multi-line) as one message
-    self.add_message("you", line.clone());
+        // ✅ Treat the entire input (even multi-line) as one message
+        self.add_message("you", line.clone());
 
-    if line.starts_with('/') {
-        // Pass the correct arguments including selected_agent and mutable mode reference
-        handle_command(
-            &line,
-            &mut self.workflows,
-            &mut self.active_workflow,
-            &self.tx,
-            &mut self.messages,
-            &mut self.selected_agent, // Pass the mutable reference
-            &mut self.mode,          // Pass the mutable mode reference
-        );
-    } else {
-        // ... (rest of the else block for non-command input)
-        if let Some(cfg) = self.workflows.get(&self.active_workflow) {
-            // Convert Option<usize> to Option<i32> before sending
-            let start_agent_i32: Option<i32> = self.selected_agent.map(|i| i as i32);
-            let _ = self.tx.send(AppCommand::RunWorkflow {
-                workflow_name: cfg.name.clone(),
-                prompt: line.clone(),
-                cfg: cfg.clone(),
-                start_agent: start_agent_i32, // Use the converted value
-            });
-            self.add_message("system", format!("Running workflow '{}' with prompt: {}", cfg.name, line));
+        if line.starts_with('/') {
+            // Pass the correct arguments including selected_agent and mutable mode reference
+            handle_command(
+                &line,
+                &mut self.workflows,
+                &mut self.active_workflow,
+                &self.tx,
+                &mut self.messages,
+                &mut self.selected_agent, // Pass the mutable reference
+                &mut self.mode,          // Pass the mutable mode reference
+            );
         } else {
-            self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
+            // ... (rest of the else block for non-command input)
+            if let Some(cfg) = self.workflows.get(&self.active_workflow) {
+                // Convert Option<usize> to Option<i32> before sending
+                let start_agent_i32: Option<i32> = self.selected_agent.map(|i| i as i32);
+                let _ = self.tx.send(AppCommand::RunWorkflow {
+                    workflow_name: cfg.name.clone(),
+                    prompt: line.clone(),
+                    cfg: cfg.clone(),
+                    start_agent: start_agent_i32, // Use the converted value
+                });
+                self.add_message("system", format!("Running workflow '{}' with prompt: {}", cfg.name, line));
+            } else {
+                self.add_message("system", "No active workflow selected. Use /workflow to select one.".to_string());
+            }
         }
     }
-}
 
     pub fn render(&self, f: &mut Frame) {
         // Handle different modes
@@ -431,6 +475,16 @@ impl App {
                 // Create mode layout - full screen for create interface
                 let area = f.area();
                 self.render_create_mode(f, area);
+            }
+            Mode::Workflow => {
+                // Workflow mode layout - full screen for workflow selection
+                let area = f.area();
+                self.render_workflow_mode(f, area);
+            }
+            Mode::Options => {
+                // Options mode layout - full screen for options input
+                let area = f.area();
+                self.render_options_mode(f, area);
             }
             _ => {
                 // Normal chat mode layout
@@ -752,7 +806,7 @@ impl App {
     pub fn handle_create_left(&mut self) {
         // Navigate to previous agent in create mode
         if self.create_focus >= 11 { // Only allow navigation if we're past the first agent
-            self.create_focus -= 5; // Move left by 5 fields to previous agent
+            self.create_focus -= 1; // Move left by 5 fields to previous agent
             self.create_input.clear(); // Clear input for new field
         }
     }
@@ -762,7 +816,7 @@ impl App {
         if let Some(cfg) = self.workflows.get(&self.active_workflow) {
             let max_focus = 6 + (cfg.rows.len() * 5); // 6 base fields + 5 per agent
             if self.create_focus < max_focus - 5 { // Don't go past the last agent
-                self.create_focus += 5; // Move right by 5 fields to next agent
+                self.create_focus += 1; // Move right by 5 fields to next agent
                 self.create_input.clear(); // Clear input for new field
             }
         }
@@ -771,7 +825,7 @@ impl App {
     pub fn handle_create_up(&mut self) {
         // Navigate up in create mode (previous field in same column)
         if self.create_focus >= 5 {
-            self.create_focus -= 5; // Move up by 5 fields to stay in same column
+            self.create_focus -= 1; // Move up by 5 fields to stay in same column
             self.create_input.clear();
         }
     }
@@ -781,7 +835,7 @@ impl App {
         if let Some(cfg) = self.workflows.get(&self.active_workflow) {
             let max_focus = 6 + (cfg.rows.len() * 5); // 6 base fields + 5 per agent
             if self.create_focus < max_focus {
-                self.create_focus += 5; // Move down by 5 fields to stay in same column
+                self.create_focus += 1; // Move down by 5 fields to stay in same column
                 self.create_input.clear(); // Clear input for new field
             }
         }
@@ -819,6 +873,98 @@ impl App {
     pub fn render_create_mode(&self, f: &mut Frame, area: Rect) {
         if let Some(cfg) = self.workflows.get(&self.active_workflow) {
             create_ui::render_create(f, cfg, self.create_focus, &self.create_input, area);
+        }
+    }
+
+    /// Render workflow mode UI
+    pub fn render_workflow_mode(&self, f: &mut Frame, area: Rect) {
+        // Convert workflow_list to the expected type for the workflow_ui function
+        let workflow_configs: Vec<WorkflowConfig> = self.workflow_list.iter()
+            .filter_map(|name| self.workflows.get(name).cloned())
+            .collect();
+        workflow_ui::render_workflow(f, &workflow_configs, self.workflow_index, area);
+    }
+
+    /// Render options mode UI
+    pub fn render_options_mode(&self, f: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Title
+                Constraint::Min(1),   // Instructions
+                Constraint::Length(3), // Input area
+            ])
+            .split(area);
+
+        // Title
+        let title = Paragraph::new("🔧 Options Mode")
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            .alignment(ratatui::prelude::Alignment::Center);
+        f.render_widget(title, chunks[0]);
+
+        // Instructions
+        let instructions = vec![
+            Line::from("Type your input to be sent to poml template:"),
+            Line::from(""),
+            Line::from("Example: <let name=\"input2\">place input here</let>"),
+            Line::from(""),
+            Line::from("Press Enter to submit, Esc to exit options mode"),
+        ];
+        
+        let instructions_para = Paragraph::new(instructions)
+            .block(Block::default()
+                .borders(Borders::NONE)
+                .style(Style::default().fg(Color::Gray)));
+        f.render_widget(instructions_para, chunks[1]);
+
+        // Input area
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .title("📝 Input")
+            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+            
+        let input_para = Paragraph::new(self.options_input.as_str())
+            .style(Style::default().fg(Color::White))
+            .block(input_block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(input_para, chunks[2]);
+
+        // Set cursor position for options input
+        let cx = chunks[2].x + 2 + self.options_input.graphemes(true).count() as u16;
+        let cy = chunks[2].y + 1;
+        f.set_cursor_position(Position::new(cx, cy));
+    }
+
+    /// Handle options mode input submission
+    pub fn handle_options_submit(&mut self) {
+        let input = self.options_input.clone();
+        self.options_input.clear();
+        
+        // Add the submitted input as a message
+        self.add_message("you", input.clone());
+        
+        // Process the poml template injection
+        if let Some(cfg) = self.workflows.get_mut(&self.active_workflow) {
+            // Save the current state before processing
+            let workflow_name = cfg.name.clone();
+            let all: Vec<WorkflowConfig> = self.workflows.values().cloned().collect();
+            let save_result = save_all_nm(&all);
+            
+            if let Err(e) = save_result {
+                self.add_message("error", format!("Failed to save workflow: {}", e));
+            } else {
+                self.add_message("system", format!("Options input processed for workflow '{}'", workflow_name));
+            }
+        }
+        
+        // Exit options mode
+        self.mode = Mode::Chat;
+    }
+
+    /// Handle options mode backspace
+    pub fn handle_options_backspace(&mut self) {
+        if !self.options_input.is_empty() {
+            self.options_input.pop();
         }
     }
 }

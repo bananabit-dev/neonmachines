@@ -142,6 +142,13 @@ pub fn handle_command(
             });
             *mode = Mode::Workflow;
         }
+        "/options" => {
+            messages.push(ChatMessage {
+                from: "system",
+                text: "Entering options mode - type your input to send to poml template".into(),
+            });
+            *mode = Mode::Options;
+        }
         "/chat" => {
             messages.push(ChatMessage {
                 from: "system",
@@ -376,6 +383,7 @@ Available commands:
 /save                - Save all workflows to config.nm
 /create [name]       - Create or edit a workflow
 /workflow            - Enter workflow selection mode
+/options             - Enter options mode for poml template input
 /chat                - Enter interactive chat mode
 /agent [number|none|list] - Select agent for routing
 /history [agent|all] - Show execution history
@@ -394,6 +402,7 @@ Examples:
 /agent 2 - Select agent 2 for routing
 /agent none - Use default routing
 /create newworkflow - Create new workflow named 'newworkflow'
+/options - Enter options mode for poml template input
 /trace on - Enable API call tracing
 "#;
     messages.push(ChatMessage {

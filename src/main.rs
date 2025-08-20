@@ -13,6 +13,7 @@ mod error;
 mod metrics;
 mod nmmcp;
 mod create_ui;
+mod workflow_ui;
 
 use color_eyre::Result;
 use crossterm::event;
