@@ -38,9 +38,21 @@ use tracing_appender::{non_blocking, rolling};
 use warp::Filter;
 use serde::Serialize;
 use std::time::Instant;
+use sysinfo::{System, SystemExt};
+
 
 
 static START_TIME: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
+
+#[derive(Serialize)]
+struct Trace {
+    id: String,
+    timestamp: String,
+    service: String,
+    status: String,
+    duration: String,
+}
+
 
 #[derive(Serialize)]
 struct Metrics {
@@ -274,15 +286,62 @@ async fn run_web(cli: Cli) -> Result<()> {
 
     let metrics_route = warp::path!("api" / "metrics")
         .map(|| {
+            let mut system = System::new_all();
+            system.refresh_all();
+
             let metrics = Metrics {
                 uptime: format!("{:.2?}", START_TIME.elapsed()),
-                memory_usage: "N/A".to_string(), // Placeholder
-                cpu_usage: "N/A".to_string(),    // Placeholder
+                memory_usage: format!("{:.2} GB / {:.2} GB", system.used_memory() as f64 / 1_000_000_000.0, system.total_memory() as f64 / 1_000_000_000.0),
+                cpu_usage: format!("{:#?}%", system.cpus()),
             };
             warp::reply::json(&metrics)
         });
 
     let routes = root.or(create_route).or(ws_route).or(static_files).or(metrics_route);
+
+    let tracing_route = warp::path!("api" / "tracing")
+        .map(|| {
+            let traces = vec![
+                Trace {
+                    id: "1".to_string(),
+                    timestamp: "2025-08-20 21:28:10".to_string(),
+                    service: "OpenAI".to_string(),
+                    status: "Success".to_string(),
+                    duration: "1.2s".to_string(),
+                },
+                Trace {
+                    id: "2".to_string(),
+                    timestamp: "2025-08-20 21:28:12".to_string(),
+                    service: "Anthropic".to_string(),
+                    status: "Failure".to_string(),
+                    duration: "0.8s".to_string(),
+                },
+            ];
+            warp::reply::json(&traces)
+        });
+
+
+    let tracing_route = warp::path!("api" / "tracing")
+        .map(|| {
+            let traces = vec![
+                Trace {
+                    id: "1".to_string(),
+                    timestamp: "2025-08-20 21:28:10".to_string(),
+                    service: "OpenAI".to_string(),
+                    status: "Success".to_string(),
+                    duration: "1.2s".to_string(),
+                },
+                Trace {
+                    id: "2".to_string(),
+                    timestamp: "2025-08-20 21:28:12".to_string(),
+                    service: "Anthropic".to_string(),
+                    status: "Failure".to_string(),
+                    duration: "0.8s".to_string(),
+                },
+            ];
+            warp::reply::json(&traces)
+        });
+
 
     warp::serve(routes).run(addr.parse::<std::net::SocketAddr>()?).await;
 

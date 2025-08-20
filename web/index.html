@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neonmachines Web Interface</title>
     <link rel="stylesheet" href="static/css/main.css">
+    <link rel="stylesheet" href="static/css/buttons.css">
+
     <link rel="icon" type="image/x-icon" href="static/favicon.ico">
 </head>
 <body>
@@ -21,6 +23,8 @@
                     <button class="nav-tab" data-tab="graph-editor">Graph Editor</button>
                     <button class="nav-tab" data-tab="poml-editor">POML Editor</button>
                     <button class="nav-tab" data-tab="metrics">Metrics</button>
+                    <button class="nav-tab" data-tab="tracing">Tracing</button>
+
                 </nav>
                 <div class="header-actions">
                     <button class="btn btn-secondary" id="save-btn">Save</button>
@@ -46,6 +50,10 @@
             <div id="poml-editor" class="tab-content">
                 <!-- POML editor content will be loaded here -->
             </div>
+            <div id="tracing" class="tab-content">
+                <!-- Tracing content will be loaded here -->
+            </div>
+
             <div id="metrics" class="tab-content">
                 <!-- Metrics content will be loaded here -->
             </div>

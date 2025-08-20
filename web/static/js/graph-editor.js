@@ -1,5 +1,10 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const graphCanvas = document.getElementById('graph-canvas');
+function initializeGraphEditor() {
+    if (!window.socket) {
+        console.error("Socket not found");
+        return;
+    }
+
+    const socket = window.socket;
     const addNodeBtn = document.getElementById('add-node-btn');
     const connectBtn = document.getElementById('connect-btn');
     const deleteBtn = document.getElementById('delete-btn');
@@ -11,14 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedNodes = [];
     let isConnecting = false;
 
-    // Clear properties panel when clicking on the canvas background
-    graphCanvas.addEventListener('click', (e) => {
-        if (e.target.id === 'graph-canvas') {
-            selectedNodes = [];
-            renderNodeProperties(null);
-            renderGraph();
-        }
-    });
+    // Function to send commands to the server
+    const sendCommand = (command, payload) => {
+        socket.send(JSON.stringify({ command, payload }));
+    };
 
     addNodeBtn.addEventListener('click', () => {
         const node = {
@@ -32,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
             on_failure: null,
         };
         nodes.push(node);
+        sendCommand('add_node', node);
         renderGraph();
     });
 
@@ -51,7 +53,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadGraphBtn.addEventListener('click', () => {
-        console.log('Load graph button clicked');
+        fetch('static/graph.json')
+            .then(response => response.json())
+            .then(data => {
+                nodes = data.nodes;
+                connections = data.connections;
+                renderGraph();
+            })
+            .catch(error => {
+                console.error('Error loading graph:', error);
+            });
     });
 
     function handleNodeClick(node) {
@@ -186,4 +197,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     renderGraph();
-});
+}
+
+initializeGraphEditor();

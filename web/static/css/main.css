@@ -78,36 +78,7 @@ body, html {
     box-shadow: 0 0 10px #00ff00;
 }
 
-.header-actions .btn {
-    margin-left: 10px;
-    font-family: inherit;
-    border-radius: 5px;
-    padding: 8px 15px;
-    cursor: pointer;
-    font-size: 1em;
-    transition: all 0.3s;
-}
 
-.btn-primary {
-    background-color: #00ff00;
-    color: #0d0d0d;
-    border: 2px solid #00ff00;
-}
-
-.btn-primary:hover {
-    box-shadow: 0 0 15px #00ff00;
-}
-
-.btn-secondary {
-    background-color: transparent;
-    color: #00ff00;
-    border: 2px solid #00ff00;
-}
-
-.btn-secondary:hover {
-    background-color: #00ff00;
-    color: #0d0d0d;
-}
 
 /* Main content area */
 .main-content {
@@ -173,4 +144,32 @@ body, html {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+
+/* Graph editor specific styles */
+.graph-canvas {
+    width: 100%;
+    height: 100%;
+    background-color: #1a1a1a;
+    border: 1px solid #00ff00;
+}
+
+.node circle {
+    fill: #0d0d0d;
+    stroke: #00ff00;
+    stroke-width: 2px;
+}
+
+.node.selected circle {
+    stroke: #00ffff; /* Neon cyan for selected */
+}
+
+.node text {
+    fill: #00ff00;
+}
+
+.connection {
+    stroke: #00ff00;
+    stroke-width: 2px;
 }

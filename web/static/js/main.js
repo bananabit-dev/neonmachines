@@ -1,6 +1,4 @@
-console.log("main.js loaded");
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM fully loaded and parsed");
     const chatMessages = document.getElementById('chat-messages');
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
@@ -9,38 +7,70 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const socket = new WebSocket('ws://' + location.host + '/ws');
 
-    socket.onopen = () => {
-        addMessage('system', 'Connected to the server.');
+    socket.onopen = () => addMessage('system', 'Connected to the server.');
+    socket.onclose = () => addMessage('system', 'Disconnected from the server.');
+    socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        addMessage('system', 'Error connecting to the server.');
     };
 
+    // Make the socket connection globally available for other scripts
+    window.socket = socket;
+
+    // Handle incoming messages from the server
     socket.onmessage = (event) => {
-        const message = event.data;
-        addMessage('server', message);
+        try {
+            const response = JSON.parse(event.data);
+            const from = response.status || 'server';
+            const text = response.data || event.data;
+            addMessage(from, text);
+        } catch (e) {
+            // If the message is not JSON, display it as-is
+            addMessage('server', event.data);
+        }
     };
 
-    socket.onclose = () => {
-        addMessage('system', 'Disconnected from the server.');
-    };
-
-    // Tab switching
+    // --- Tab Switching Logic ---
+    const loadedTabs = new Set();
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
-            console.log(`Tab clicked: ${tab.getAttribute('data-tab')}`);
             tabs.forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             const tabName = tab.getAttribute('data-tab');
             tabContents.forEach(content => {
-                if (content.id === tabName) {
-                    content.classList.add('active');
-                } else {
-                    content.classList.remove('active');
-                }
+                content.classList.toggle('active', content.id === tabName);
             });
             loadTabContent(tabName);
         });
     });
 
-    // Chat functionality
+    function loadTabContent(tabName) {
+        // Chat tab is static, and other tabs should only be loaded once
+        if (tabName === 'chat' || loadedTabs.has(tabName)) {
+            return;
+        }
+
+        const contentDiv = document.getElementById(tabName);
+        fetch(`${tabName}.html`)
+            .then(response => {
+                if (!response.ok) throw new Error(`Failed to load HTML for ${tabName}`);
+                return response.text();
+            })
+            .then(html => {
+                contentDiv.innerHTML = html;
+                // Now, dynamically load the corresponding JavaScript for the tab
+                const script = document.createElement('script');
+                script.src = `static/js/${tabName}.js`;
+                document.body.appendChild(script);
+                loadedTabs.add(tabName);
+            })
+            .catch(error => {
+                console.error('Error loading tab content:', error);
+                contentDiv.innerHTML = `<p>Error loading content.</p>`;
+            });
+    }
+
+    // --- Chat Functionality ---
     function addMessage(from, text) {
         const messageElement = document.createElement('div');
         messageElement.classList.add('chat-message');
@@ -53,75 +83,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const inputText = chatInput.value.trim();
         if (inputText) {
             addMessage('you', inputText);
-            socket.send(inputText);
+            // Send chat messages in the JSON format the backend expects
+            socket.send(JSON.stringify({ command: "submit", payload: inputText }));
             chatInput.value = '';
         }
     }
 
     sendBtn.addEventListener('click', handleUserInput);
     chatInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            handleUserInput();
-        }
+        if (event.key === 'Enter') handleUserInput();
     });
 
-    // Welcome message
-    addMessage('system', 'Welcome to Neonmachines! Type your message or use /help for commands.');
-
-    const loadedScripts = new Set();
-
-    function loadTabContent(tabName) {
-        console.log(`Loading content for tab: ${tabName}`);
-        const contentDiv = document.getElementById(tabName);
-        
-        // Only load content for non-chat tabs
-        if (tabName !== 'chat') {
-            fetch(`${tabName}.html`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`Failed to load ${tabName}.html`);
-                    }
-                    return response.text();
-                })
-                .then(data => {
-                    contentDiv.innerHTML = data;
-                    // Load script only if it hasn't been loaded before
-                    if (!loadedScripts.has(tabName)) {
-                        console.log(`Loading script for tab: ${tabName}`);
-                        const script = document.createElement('script');
-                        script.src = `static/js/${tabName}.js`;
-                        script.onload = () => {
-                            console.log(`Script loaded for tab: ${tabName}`);
-                            loadedScripts.add(tabName);
-                        };
-                        document.body.appendChild(script);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading tab content:', error);
-                    contentDiv.innerHTML = `<p class="error-message">Error loading content for ${tabName}.</p>`;
-                });
-        }
-    }
-
-    // Load the default tab's content
-    loadTabContent('graph-editor');
-
-    const saveBtn = document.getElementById('save-btn');
-    const runBtn = document.getElementById('run-btn');
-
-    saveBtn.addEventListener('click', () => {
-        const activeTab = document.querySelector('.nav-tab.active').getAttribute('data-tab');
-        if (activeTab === 'poml-editor') {
-            const pomlContent = document.getElementById('poml-text-editor').value;
-            socket.send(JSON.stringify({ command: 'save', file: 'workflow.poml', content: pomlContent }));
-        } else {
-            console.log("Save functionality is only available for POML editor.");
-        }
-    });
-
-    runBtn.addEventListener('click', () => {
-        const activeTab = document.querySelector('.nav-tab.active').getAttribute('data-tab');
-        socket.send(JSON.stringify({ command: 'run', workflow: activeTab }));
-    });
+    addMessage('system', 'Welcome to Neonmachines!');
 });

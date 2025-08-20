@@ -1,0 +1,5 @@
+- name: My Workflow
+  steps:
+    - name: Step 1
+      agent: MyAgent
+      prompt: "Hello, world!"

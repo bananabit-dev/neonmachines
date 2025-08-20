@@ -1,0 +1,31 @@
+{
+    "nodes": [
+        {
+            "id": 0,
+            "x": 100,
+            "y": 100,
+            "type": "Agent",
+            "files": "main.py",
+            "max_iterations": 3,
+            "on_success": 1,
+            "on_failure": null
+        },
+        {
+            "id": 1,
+            "x": 300,
+            "y": 100,
+            "type": "Validator",
+            "files": "test.py",
+            "max_iterations": 1,
+            "on_success": null,
+            "on_failure": null
+        }
+    ],
+    "connections": [
+        {
+            "source": 0,
+            "target": 1,
+            "type": "success"
+        }
+    ]
+}
