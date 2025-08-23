@@ -374,13 +374,19 @@ pub async fn run_workflow(
             let mut current_node = start_agent.unwrap_or(0) as i32;
             let mut current_input = prompt.clone();
             let mut traversals = 0;
-            let max_traversals = cfg.maximum_traversals;
+            // Allow infinite looping when max_traversals is 0, otherwise use the limit
+            let max_traversals = if cfg.maximum_traversals == 0 { 
+                u32::MAX 
+            } else { 
+                cfg.maximum_traversals as u32
+            };
 
             let metrics_collector = metrics.unwrap_or_else(|| Arc::new(Mutex::new(MetricsCollector::new())));
             let _request_id = metrics_collector
                 .lock().await
                 .start_request("workflow_execution".to_string()).await;
 
+            // Use u32::MAX for true infinite looping or a large number for practical limits
             while traversals < max_traversals {
                 traversals += 1;
 
@@ -421,8 +427,14 @@ pub async fn run_workflow(
                     continue;
                 }
 
-                // No next node → stop
-                break;
+                // No next node → stop unless we want infinite looping
+                if cfg.maximum_traversals != 0 {
+                    break;
+                }
+                
+                // For infinite looping, restart from node 0
+                current_node = 0;
+                current_input = step_output.clone();
             }
 
             // ✅ Final metrics + alerts

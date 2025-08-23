@@ -257,7 +257,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            crossterm::event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_down();
@@ -279,6 +279,42 @@ impl App {
                     _ => {
                         self.move_cursor_down();
                     }
+                }
+            }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::PageUp, .. }) => {
+                match self.mode {
+                    Mode::Chat => {
+                        // Scroll messages up by 10 lines
+                        self.messages_scroll = self.messages_scroll.saturating_sub(10);
+                    }
+                    _ => {}
+                }
+            }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::PageDown, .. }) => {
+                match self.mode {
+                    Mode::Chat => {
+                        // Scroll messages down by 10 lines
+                        self.messages_scroll = (self.messages_scroll + 10).min(self.messages.len() as u16);
+                    }
+                    _ => {}
+                }
+            }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Home, modifiers: KeyModifiers::CONTROL, .. }) => {
+                match self.mode {
+                    Mode::Chat => {
+                        // Scroll to top of messages
+                        self.messages_scroll = 0;
+                    }
+                    _ => {}
+                }
+            }
+            crossterm::event::Event::Key(KeyEvent { code: KeyCode::End, modifiers: KeyModifiers::CONTROL, .. }) => {
+                match self.mode {
+                    Mode::Chat => {
+                        // Scroll to bottom of messages (newest)
+                        self.messages_scroll = self.messages.len() as u16;
+                    }
+                    _ => {}
                 }
             }
             crossterm::event::Event::Key(KeyEvent { code: KeyCode::Esc, .. }) => {
@@ -585,6 +621,16 @@ impl App {
                     }
                 }
                 
+                // Calculate scrollbar position
+                let content_height = lines.len() as u16;
+                let viewport_height = main_area.height.saturating_sub(2); // Subtract 2 for borders
+                let scroll_ratio = if content_height > 0 {
+                    (self.messages_scroll as f32 / content_height as f32).min(1.0)
+                } else {
+                    0.0
+                };
+                let scrollbar_position = (scroll_ratio * viewport_height as f32) as u16;
+                
                 let para = Paragraph::new(lines)
                     .block(Block::default()
                         .borders(Borders::ALL)
@@ -593,6 +639,27 @@ impl App {
                     .wrap(Wrap { trim: false })
                     .scroll((self.messages_scroll, 0));
                 f.render_widget(para, main_area);
+                
+                // Render scrollbar if needed
+                if content_height > viewport_height {
+                    // Draw a simple scrollbar on the right edge
+                    let scrollbar_area = Rect::new(
+                        main_area.x + main_area.width - 1,
+                        main_area.y + 1,
+                        1,
+                        viewport_height,
+                    );
+                    
+                    // Draw scrollbar track
+                    for y in 0..viewport_height {
+                        let ch = if y == scrollbar_position { '█' } else { '░' };
+                        f.render_widget(
+                            Paragraph::new(format!("{}", ch))
+                                .style(Style::default().fg(Color::DarkGray)),
+                            Rect::new(scrollbar_area.x, scrollbar_area.y + y, 1, 1),
+                        );
+                    }
+                }
                 
                 // Render performance metrics if available using cached text
                 let metrics_text = if self.cached_metrics_text.is_empty() {
