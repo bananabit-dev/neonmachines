@@ -1,0 +1,60 @@
+# Neonmachines Hints File (.nmhints)
+# This file provides hints to Neonmachines about how to process files and directories
+# Format: file_pattern:hint_type:hint_value
+
+# Code file hints - suggest language-specific processing
+*.py:language:python
+*.rs:language:rust
+*.js:language:javascript
+*.ts:language:typescript
+*.jsx:language:jsx
+*.tsx:language:tsx
+*.html:language:html
+*.css:language:css
+*.scss:language:scss
+*.md:language:markdown
+*.json:language:json
+*.yaml:language:yaml
+*.yml:language:yaml
+*.toml:language:toml
+*.xml:language:xml
+*.sql:language:sql
+
+# Documentation hints - mark files that contain documentation
+README.md:doc:true
+*.md:doc:true
+CHANGELOG.md:doc:true
+LICENSE:doc:true
+CONTRIBUTING.md:doc:true
+docs/*:doc:true
+
+# Test file hints - mark files that contain tests
+*_test.rs:test:true
+*_test.py:test:true
+*.test.js:test:true
+*.spec.js:test:true
+tests/*:test:true
+test/*:test:true
+
+# Configuration hints - mark configuration files
+*.nm:config:true
+*.nmmcpextension:config:true
+*.nmextension:config:true
+*.nmignore:config:true
+*.nmhints:config:true
+config.*:config:true
+
+# AI processing hints - suggest specific AI processing approaches
+*.md:ai_approach:documentation
+*.py:ai_approach:code_review
+*.rs:ai_approach:code_review
+prompts/*.poml:ai_approach:prompt_engineering
+*.sql:ai_approach:data_analysis
+
+# Priority hints - suggest processing priority
+README.md:priority:high
+*.nm:priority:high
+prompts/*.poml:priority:high
+*.py:priority:medium
+*.rs:priority:medium
+*.md:priority:low

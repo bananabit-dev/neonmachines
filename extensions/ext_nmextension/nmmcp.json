@@ -1,0 +1,58 @@
+{
+  "name": "nmextension_template",
+  "version": "1.0.0",
+  "description": "Template for creating NMExtensions for Neonmachines",
+  "author": "Neonmachines Team",
+  "entry_point": "nmextension.sh",
+  "dependencies": [],
+  "tools": [
+    {
+      "name": "template_generator",
+      "description": "Generate project templates",
+      "parameters": {
+        "required": ["template_type"],
+        "optional": ["project_name", "output_dir"],
+        "types": {
+          "template_type": "string",
+          "project_name": "string",
+          "output_dir": "string"
+        }
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "template_type": {
+            "type": "string",
+            "description": "Type of template to generate",
+            "enum": ["web", "cli", "api", "library"]
+          },
+          "project_name": {
+            "type": "string",
+            "description": "Name of the project"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "Output directory for the template"
+          }
+        },
+        "required": ["template_type"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "Template generation result"
+          }
+        },
+        "required": ["result"]
+      }
+    }
+  ],
+  "capabilities": {
+    "model_control": false,
+    "tool_integration": true,
+    "file_operations": true,
+    "system_access": true
+  }
+}

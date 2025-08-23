@@ -5,6 +5,196 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::metrics::metrics_collector::MetricsCollector;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::path::Path;
+
+/// Generate MCP template content
+fn generate_mcp_template(name: &str) -> String {
+    format!(r#"{{
+  "name": "{}",
+  "version": "1.0.0",
+  "description": "A sample MCP extension for {}",
+  "author": "Your Name",
+  "entry_point": "main.py",
+  "dependencies": [],
+  "tools": [
+    {{
+      "name": "{}_tool",
+      "description": "A sample tool for {}",
+      "parameters": {{
+        "required": ["input"],
+        "optional": ["option"],
+        "types": {{
+          "input": "string",
+          "option": "string"
+        }}
+      }},
+      "input_schema": {{
+        "type": "object",
+        "properties": {{
+          "input": {{
+            "type": "string",
+            "description": "Input text for processing"
+          }},
+          "option": {{
+            "type": "string",
+            "description": "Optional parameter"
+          }}
+        }},
+        "required": ["input"]
+      }},
+      "output_schema": {{
+        "type": "object",
+        "properties": {{
+          "result": {{
+            "type": "string",
+            "description": "Processing result"
+          }}
+        }},
+        "required": ["result"]
+      }}
+    }}
+  ],
+  "capabilities": {{
+    "model_control": true,
+    "tool_integration": true,
+    "file_operations": false,
+    "system_access": false
+  }}
+}}"#, name, name, name, name)
+}
+
+/// Generate tool template content
+fn generate_tool_template(name: &str) -> String {
+    format!(r#"name: {name}_tool
+description: A sample tool for {name}
+
+prompt: |
+  You are a helpful assistant that processes user input.
+  
+  Input: {{input}}
+  Option: {{option}}
+  
+  Please process this input and provide a helpful response.
+
+input_variables:
+  - name: input
+    description: "Input text for processing"
+    required: true
+  - name: option
+    description: "Optional parameter"
+    required: false
+
+output_format: |
+  {{result}}
+
+examples:
+  - input: "Hello world"
+    output: "{{result: \"Processed: Hello world\"}}"
+  - input: "Test input"
+    option: "with option"
+    output: "{{result: \"Processed with option: Test input\"}}"
+"#, name = name)
+}
+
+/// Create MCP template directory structure
+fn create_mcp_template_structure(path: &str, metadata: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Create directory
+    std::fs::create_dir_all(path)?;
+    
+    // Create metadata file
+    let metadata_path = format!("{}/nmmcp.json", path);
+    std::fs::write(&metadata_path, metadata)?;
+    
+    // Create main.py entry point
+    let main_py_content = r#"#!/usr/bin/env python3
+"""
+Sample MCP Extension Entry Point
+"""
+import json
+import sys
+
+def main():
+    """Main entry point for the extension"""
+    try:
+        # Read input from stdin
+        input_data = json.load(sys.stdin)
+        
+        # Process the input
+        result = process_input(input_data)
+        
+        # Output result to stdout
+        json.dump(result, sys.stdout)
+        
+    except Exception as e:
+        # Error handling
+        error_result = {
+            "error": str(e)
+        }
+        json.dump(error_result, sys.stdout)
+
+def process_input(data):
+    """Process input data and return result"""
+    # Extract parameters
+    input_text = data.get("input", "")
+    option = data.get("option", "")
+    
+    # Process the input (this is where your logic would go)
+    if option:
+        result = f"Processed: {input_text} with option: {option}"
+    else:
+        result = f"Processed: {input_text}"
+    
+    return {
+        "result": result
+    }
+
+if __name__ == "__main__":
+    main()
+"#;
+    
+    let main_py_path = format!("{}/main.py", path);
+    std::fs::write(&main_py_path, main_py_content)?;
+    
+    // Create README.md
+    let readme_content = format!(r#"# {} MCP Extension
+
+This is a sample MCP extension for {}.
+
+## Installation
+
+1. Copy this directory to your extensions folder
+2. Register the extension in your configuration
+
+## Usage
+
+This extension provides a sample tool that processes input text.
+
+## Files
+
+- `nmmcp.json` - Extension metadata
+- `main.py` - Entry point script
+- `README.md` - This file
+"#, path.split("/").last().unwrap_or("extension"), path.split("/").last().unwrap_or("extension"));
+    
+    let readme_path = format!("{}/README.md", path);
+    std::fs::write(&readme_path, readme_content)?;
+    
+    Ok(())
+}
+
+/// Create tool template file
+fn create_tool_template_file(path: &str, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Ensure prompts directory exists
+    let prompts_dir = Path::new("prompts");
+    if !prompts_dir.exists() {
+        std::fs::create_dir_all(prompts_dir)?;
+    }
+    
+    // Write the template file
+    std::fs::write(path, content)?;
+    
+    Ok(())
+}
 
 pub enum AppCommand {
     RunWorkflow {
@@ -17,6 +207,10 @@ pub enum AppCommand {
         agent_index: Option<i32>,
         workflow_name: String,
         cfg: crate::nm_config::WorkflowConfig,
+    },
+    CreateTemplate {
+        template_type: String,
+        template_name: String,
     },
 }
 
@@ -40,6 +234,60 @@ pub async fn run_workflow(
                 workflow_name, agent_index
             )));
             let _ = log_tx.send(AppEvent::RunResult("History display not yet implemented".to_string()));
+        }
+        AppCommand::CreateTemplate { template_type, template_name } => {
+            let _ = log_tx.send(AppEvent::Log(format!(
+                "Creating {} template: {}", 
+                template_type, template_name
+            )));
+
+            match template_type.as_str() {
+                "mcp" => {
+                    // Create MCP template
+                    let template_content = generate_mcp_template(&template_name);
+                    let file_path = format!("extensions/ext_{}", template_name);
+                    
+                    // Create directory and files
+                    match create_mcp_template_structure(&file_path, &template_content) {
+                        Ok(_) => {
+                            let _ = log_tx.send(AppEvent::Log(format!(
+                                "MCP template '{}' created at {}", 
+                                template_name, file_path
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = log_tx.send(AppEvent::Error(format!(
+                                "Failed to create MCP template: {}", e
+                            )));
+                        }
+                    }
+                }
+                "tool" => {
+                    // Create tool template
+                    let template_content = generate_tool_template(&template_name);
+                    let file_path = format!("prompts/{}_tool.poml", template_name);
+                    
+                    // Create tool file
+                    match create_tool_template_file(&file_path, &template_content) {
+                        Ok(_) => {
+                            let _ = log_tx.send(AppEvent::Log(format!(
+                                "Tool template '{}' created at {}", 
+                                template_name, file_path
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = log_tx.send(AppEvent::Error(format!(
+                                "Failed to create tool template: {}", e
+                            )));
+                        }
+                    }
+                }
+                _ => {
+                    let _ = log_tx.send(AppEvent::Error(format!(
+                        "Unknown template type: {}", template_type
+                    )));
+                }
+            }
         }
 
         AppCommand::RunWorkflow { workflow_name, prompt, cfg, start_agent } => {

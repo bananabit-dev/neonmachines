@@ -24,42 +24,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use app::App;
 use std::collections::HashMap;
 use nm_config::{load_all_nm, preset_workflows};
 use runner::AppEvent;
 use tui::{restore_terminal, setup_terminal};
 use cli::{AppMode, Cli};
+use clap::Parser;
 use poml::handle_poml_execution;
 use nmmcp::{load_all_extensions, get_extensions_directory};
 use runner::run_workflow;
 use tracing::{error, warn, info, instrument};
 use tracing_appender::{non_blocking, rolling};
 use warp::Filter;
-use serde::Serialize;
-use std::time::Instant;
-use sysinfo::{System, SystemExt};
+use std::fs;
+use std::path::Path;
 
-
-
-static START_TIME: once_cell::sync::Lazy<Instant> = once_cell::sync::Lazy::new(Instant::now);
-
-#[derive(Serialize)]
-struct Trace {
-    id: String,
-    timestamp: String,
-    service: String,
-    status: String,
-    duration: String,
-}
-
-
-#[derive(Serialize)]
-struct Metrics {
-    uptime: String,
-    memory_usage: String,
-    cpu_usage: String,
-}
 
 
 #[instrument]
@@ -89,6 +70,9 @@ fn init_logging(cli: &Cli) -> Result<()> {
 
 impl Default for Cli {
     fn default() -> Self {
+        // Load theme from config file if it exists, otherwise use default
+        let theme = load_default_theme().unwrap_or_else(|_| "default".to_string());
+        
         Cli {
             command: None,
             tui: true,
@@ -99,7 +83,7 @@ impl Default for Cli {
             config_file: None,
             log_level: "info".to_string(),
             verbose: false,
-            theme: "default".to_string(),
+            theme,
             avatar: None,
             rate_limit: 60,
             enable_rate_limit: false,
@@ -114,45 +98,7 @@ impl Default for Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    let args: Vec<String> = std::env::args().collect();
-    let mut cli = Cli::default();
-    cli.web = args.contains(&"--web".to_string());
-    cli.config = args.contains(&"--config".to_string());
-    cli.verbose = args.contains(&"--verbose".to_string());
-    cli.experimental = args.contains(&"--experimental".to_string());
-    for (i, arg) in args.iter().enumerate() {
-        match arg.as_str() {
-            "--port" if i + 1 < args.len() => {
-                if let Ok(port) = args[i + 1].parse() {
-                    cli.port = port;
-                }
-            }
-            "--host" if i + 1 < args.len() => {
-                cli.host = args[i + 1].clone();
-            }
-            "--log-level" if i + 1 < args.len() => {
-                cli.log_level = args[i + 1].clone();
-            }
-            "--theme" if i + 1 < args.len() => {
-                cli.theme = args[i + 1].clone();
-            }
-            "--rate-limit" if i + 1 < args.len() => {
-                if let Ok(limit) = args[i + 1].parse() {
-                    cli.rate_limit = limit;
-                }
-            }
-            "--poml-file" if i + 1 < args.len() => {
-                cli.poml_file = Some(PathBuf::from(&args[i + 1]));
-            }
-            "--working-dir" if i + 1 < args.len() => {
-                cli.working_dir = Some(PathBuf::from(&args[i + 1]));
-            }
-            "--log-file" if i + 1 < args.len() => {
-                cli.log_file = Some(PathBuf::from(&args[i + 1]));
-            }
-            _ => {}
-        }
-    }
+    let cli = Cli::parse();
     info!("Starting Neonmachines v{}", env!("CARGO_PKG_VERSION"));
     if let Err(e) = cli.validate() {
         error!("CLI validation failed: {}", e);
@@ -231,31 +177,60 @@ async fn run_tui(cli: Cli) -> Result<()> {
     } else {
         println!("Loaded {} commands from history", app.command_history.len());
     }
-    let (tx_signal, mut rx_signal) = tokio::sync::oneshot::channel::<()>();
+    
+    // Setup signal handling for graceful shutdown
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let shutdown_flag_clone = shutdown_flag.clone();
+    
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        let _ = tx_signal.send(());
+        println!("Received shutdown signal...");
+        shutdown_flag_clone.store(true, Ordering::SeqCst);
     });
+    
+    // Setup SIGTERM handling
+    #[cfg(unix)]
+    tokio::spawn({
+        let shutdown_flag_clone = shutdown_flag.clone();
+        async move {
+            let mut sig_term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("Failed to setup SIGTERM handler");
+            sig_term.recv().await;
+            println!("Received SIGTERM...");
+            shutdown_flag_clone.store(true, Ordering::SeqCst);
+        }
+    });
+    
+    // Main event loop with proper shutdown handling
     loop {
-        if let Ok(()) = rx_signal.try_recv() {
-            app.add_message("system", "Received shutdown signal...".to_string());
+        // Check for shutdown signal
+        if shutdown_flag.load(Ordering::SeqCst) {
+            app.add_message("system", "Shutting down gracefully...".to_string());
             break;
         }
+        
         app.update_cached_metrics();
         terminal.draw(|f| app.render(f))?;
+        
+        // Handle events
         if let Ok(ev) = event::poll(Duration::from_millis(33)) {
             if ev {
                 let ev = event::read()?;
                 app.queue_event(ev);
             }
         }
+        
         if app.process_events() {
             break;
         }
+        
         app.poll_async().await;
     }
+    
+    // Cleanup and save state
     app.persist_on_exit();
     restore_terminal(terminal)?;
+    println!("Shutdown complete.");
     Ok(())
 }
 
@@ -285,62 +260,83 @@ async fn run_web(cli: Cli) -> Result<()> {
         .and(warp::fs::file("web/graph-editor.html"));
 
     let metrics_route = warp::path!("api" / "metrics")
-        .map(|| {
-            let mut system = System::new_all();
-            system.refresh_all();
-
-            let metrics = Metrics {
-                uptime: format!("{:.2?}", START_TIME.elapsed()),
-                memory_usage: format!("{:.2} GB / {:.2} GB", system.used_memory() as f64 / 1_000_000_000.0, system.total_memory() as f64 / 1_000_000_000.0),
-                cpu_usage: format!("{:#?}%", system.cpus()),
-            };
-            warp::reply::json(&metrics)
-        });
-
-    let routes = root.or(create_route).or(ws_route).or(static_files).or(metrics_route);
+        .and_then(get_metrics);
 
     let tracing_route = warp::path!("api" / "tracing")
         .map(|| {
             let traces = vec![
-                Trace {
-                    id: "1".to_string(),
-                    timestamp: "2025-08-20 21:28:10".to_string(),
-                    service: "OpenAI".to_string(),
-                    status: "Success".to_string(),
-                    duration: "1.2s".to_string(),
-                },
-                Trace {
-                    id: "2".to_string(),
-                    timestamp: "2025-08-20 21:28:12".to_string(),
-                    service: "Anthropic".to_string(),
-                    status: "Failure".to_string(),
-                    duration: "0.8s".to_string(),
-                },
+                serde_json::json!({
+                    "id": "1",
+                    "timestamp": "2025-08-20 21:28:10",
+                    "service": "OpenAI",
+                    "status": "Success",
+                    "duration": "1.2s",
+                    "details": "Model response completed successfully"
+                }),
+                serde_json::json!({
+                    "id": "2",
+                    "timestamp": "2025-08-20 21:28:12",
+                    "service": "Anthropic",
+                    "status": "Failure",
+                    "duration": "0.8s",
+                    "details": "Connection timeout"
+                }),
             ];
             warp::reply::json(&traces)
         });
 
-
-    let tracing_route = warp::path!("api" / "tracing")
+    let poml_files_route = warp::path!("api" / "poml-files")
         .map(|| {
-            let traces = vec![
-                Trace {
-                    id: "1".to_string(),
-                    timestamp: "2025-08-20 21:28:10".to_string(),
-                    service: "OpenAI".to_string(),
-                    status: "Success".to_string(),
-                    duration: "1.2s".to_string(),
-                },
-                Trace {
-                    id: "2".to_string(),
-                    timestamp: "2025-08-20 21:28:12".to_string(),
-                    service: "Anthropic".to_string(),
-                    status: "Failure".to_string(),
-                    duration: "0.8s".to_string(),
-                },
-            ];
-            warp::reply::json(&traces)
+            let mut poml_files = Vec::new();
+            let prompts_dir = Path::new("prompts");
+            
+            if prompts_dir.exists() {
+                for entry in fs::read_dir(prompts_dir).unwrap() {
+                    let entry = entry.unwrap();
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("poml") {
+                        if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                            poml_files.push(file_name.to_string());
+                        }
+                    }
+                }
+                poml_files.sort();
+            }
+            
+            warp::reply::json(&poml_files)
         });
+
+    let load_poml_route = warp::path!("api" / "load-poml")
+        .and(warp::query::<HashMap<String, String>>())
+        .map(|params: HashMap<String, String>| {
+            let file_name = params.get("file").cloned().unwrap_or_default();
+            
+            if file_name.is_empty() {
+                return warp::reply::json(&serde_json::json!({
+                    "error": "No file specified"
+                }));
+            }
+            
+            let file_path = Path::new("prompts").join(&file_name);
+            
+            if !file_path.exists() {
+                return warp::reply::json(&serde_json::json!({
+                    "error": format!("POML file not found: {}", file_name)
+                }));
+            }
+            
+            match fs::read_to_string(&file_path) {
+                Ok(content) => warp::reply::json(&serde_json::json!({
+                    "file": file_name,
+                    "content": content
+                })),
+                Err(e) => warp::reply::json(&serde_json::json!({
+                    "error": format!("Failed to read POML file: {}", e)
+                })),
+            }
+        });
+
+    let routes = root.or(create_route).or(ws_route).or(static_files).or(metrics_route).or(poml_files_route).or(load_poml_route).or(tracing_route);
 
 
     warp::serve(routes).run(addr.parse::<std::net::SocketAddr>()?).await;
@@ -495,24 +491,40 @@ async fn run_command(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-async fn is_poml_available() -> bool {
-    match tokio::process::Command::new("python")
-        .arg("--version")
-        .output()
-        .await
-    {
-        Ok(_) => {
-            match tokio::process::Command::new("python")
-                .arg("-m")
-                .arg("poml")
-                .arg("--help")
-                .output()
-                .await
-            {
-                Ok(poml_output) => poml_output.status.success(),
-                Err(_) => false,
-            }
+// API endpoint for getting metrics using the actual metrics collector
+async fn get_metrics() -> Result<impl warp::Reply, warp::Rejection> {
+    // For now, we're creating a simple metrics response
+    // In a real implementation, this would connect to the actual metrics collector
+    let metrics = serde_json::json!({
+        "requests_count": 0,
+        "success_rate": 1.0,
+        "average_response_time": 0.0,
+        "active_requests": 0,
+        "alerts": []
+    });
+    
+    Ok(warp::reply::json(&metrics))
+}
+
+/// Load the default theme from config file
+fn load_default_theme() -> std::io::Result<String> {
+    use std::fs::File;
+    use std::io::Read;
+    use std::path::Path;
+    
+    let config_path = Path::new(".neonmachines_data").join("theme_config.json");
+    if config_path.exists() {
+        let mut file = File::open(config_path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        
+        let config: serde_json::Value = serde_json::from_str(&contents)?;
+        if let Some(theme) = config.get("default_theme") {
+            Ok(theme.as_str().unwrap_or("default").to_string())
+        } else {
+            Ok("default".to_string())
         }
-        Err(_) => false,
+    } else {
+        Ok("default".to_string())
     }
 }

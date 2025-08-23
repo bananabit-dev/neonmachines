@@ -4,9 +4,114 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Graph Editor</title>
-    <link rel="stylesheet" href="static/css/main.css">
+    <link rel="stylesheet" href="static/css/paper-theme.css">
     <link rel="stylesheet" href="static/css/buttons.css">
-
+    <style>
+        .graph-editor-container {
+            display: flex;
+            height: 100%;
+            gap: 20px;
+        }
+        
+        .graph-toolbar {
+            background: var(--paper-header, #f8f8f8);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            width: 60px;
+        }
+        
+        .tool-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .tool-btn {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            font-size: 1.2rem;
+        }
+        
+        .tool-icon {
+            font-size: 1.2rem;
+        }
+        
+        .graph-canvas-container {
+            flex: 1;
+            border: 1px solid var(--paper-border, #e0e0e0);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .graph-canvas {
+            width: 100%;
+            height: 100%;
+            background-color: var(--paper-bg, #ffffff);
+        }
+        
+        .graph-properties {
+            width: 250px;
+            background: var(--paper-header, #f8f8f8);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .graph-properties h3 {
+            margin-top: 0;
+            color: var(--paper-accent, #0066cc);
+            font-size: 1.1rem;
+        }
+        
+        .property-item {
+            margin-bottom: 10px;
+        }
+        
+        .property-item label {
+            display: block;
+            margin-bottom: 3px;
+            font-size: 0.9rem;
+            color: var(--paper-text, #666666);
+        }
+        
+        .property-item input,
+        .property-item select {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid var(--paper-border, #ced4da);
+            border-radius: 4px;
+            background-color: var(--paper-bg, #ffffff);
+            color: var(--paper-text, #333333);
+        }
+        
+        .placeholder-text {
+            color: var(--paper-text, #999999);
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .node:hover {
+            filter: brightness(1.1);
+        }
+        
+        .node.selected {
+            filter: drop-shadow(0 0 5px rgba(0, 102, 204, 0.5));
+        }
+    </style>
 </head>
 <body>
     <div class="graph-editor-container">
@@ -28,28 +133,17 @@
                     <span class="tool-icon">📁</span>
                 </button>
             </div>
-            <div class="tool-group">
-                <button class="tool-btn btn btn-secondary" id="zoom-in-btn" title="Zoom In">
-                    <span class="tool-icon">🔍+</span>
-                </button>
-                <button class="tool-btn btn btn-secondary" id="zoom-out-btn" title="Zoom Out">
-                    <span class="tool-icon">🔍-</span>
-                </button>
-                <button class="tool-btn btn btn-secondary" id="reset-view-btn" title="Reset View">
-                    <span class="tool-icon">🔄</span>
-                </button>
-            </div>
         </div>
         <div class="graph-canvas-container">
             <svg id="graph-canvas" class="graph-canvas">
                 <defs>
                     <marker id="arrowhead-success" markerWidth="10" markerHeight="7" 
                             refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="green" />
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#0066cc" />
                     </marker>
                     <marker id="arrowhead-failure" markerWidth="10" markerHeight="7" 
                             refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="red" />
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#dc3545" />
                     </marker>
                 </defs>
                 <g id="graph-connections"></g>
@@ -63,6 +157,5 @@
             </div>
         </div>
     </div>
-    <script src="static/js/graph-editor.js"></script>
 </body>
 </html>

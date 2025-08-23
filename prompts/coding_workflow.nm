@@ -1,0 +1,30 @@
+name: "Coding Agent"
+model: "gpt-4"
+temperature: 0.7
+maximum_traversals: 10
+working_dir: "."
+active_agent_index: 0
+
+# Primary coding agent
+- agent_type: Agent
+  files: "system:prompts/coding_agent.poml,user:prompts/chat_user.poml"
+  max_iterations: 5
+  iteration_delay_ms: 300
+  input_injections: []
+  output_injections: []
+
+# Security analyzer agent
+- agent_type: Agent
+  files: "system:prompts/security_analyzer.poml,user:prompts/chat_user.poml"
+  max_iterations: 3
+  iteration_delay_ms: 200
+  input_injections: []
+  output_injections: []
+
+# Code validator agent
+- agent_type: Validator
+  files: "system:prompts/cargo_validator.poml,user:prompts/chat_user.poml"
+  max_iterations: 2
+  iteration_delay_ms: 100
+  input_injections: []
+  output_injections: []

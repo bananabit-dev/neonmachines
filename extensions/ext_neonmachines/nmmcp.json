@@ -1,0 +1,98 @@
+{
+  "name": "neonmachines_core",
+  "version": "1.0.0",
+  "description": "Core tools for Neonmachines AI orchestration platform",
+  "author": "Neonmachines Team",
+  "entry_point": "main.py",
+  "dependencies": [],
+  "tools": [
+    {
+      "name": "file_analyzer",
+      "description": "Analyze and summarize file contents",
+      "parameters": {
+        "required": ["file_path"],
+        "optional": ["analysis_type"],
+        "types": {
+          "file_path": "string",
+          "analysis_type": "string"
+        }
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the file to analyze"
+          },
+          "analysis_type": {
+            "type": "string",
+            "description": "Type of analysis to perform (summary, security, performance)",
+            "enum": ["summary", "security", "performance"]
+          }
+        },
+        "required": ["file_path"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "Analysis result"
+          }
+        },
+        "required": ["result"]
+      }
+    },
+    {
+      "name": "code_generator",
+      "description": "Generate code based on specifications",
+      "parameters": {
+        "required": ["specification"],
+        "optional": ["language", "framework"],
+        "types": {
+          "specification": "string",
+          "language": "string",
+          "framework": "string"
+        }
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "specification": {
+            "type": "string",
+            "description": "Code specification or requirements"
+          },
+          "language": {
+            "type": "string",
+            "description": "Programming language for the code"
+          },
+          "framework": {
+            "type": "string",
+            "description": "Framework to use (optional)"
+          }
+        },
+        "required": ["specification"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Generated code"
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Explanation of the generated code"
+          }
+        },
+        "required": ["code", "explanation"]
+      }
+    }
+  ],
+  "capabilities": {
+    "model_control": true,
+    "tool_integration": true,
+    "file_operations": true,
+    "system_access": false
+  }
+}

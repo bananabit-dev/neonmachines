@@ -4,36 +4,142 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POML Editor</title>
-    <link rel="stylesheet" href="static/css/main.css">
+    <link rel="stylesheet" href="static/css/paper-theme.css">
     <link rel="stylesheet" href="static/css/buttons.css">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/monokai.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/yaml/yaml.min.js"></script>
+    <style>
+        .poml-editor-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 200px);
+            gap: 15px;
+            max-height: 900px;
+        }
+        
+        .editor-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: var(--paper-header, #f8f8f8);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+        }
+        
+        .tool-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .current-file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--paper-text, #333333);
+        }
+        
+        .current-file-label {
+            font-weight: bold;
+        }
+        
+        .current-file-name {
+            color: var(--paper-accent, #0066cc);
+            font-style: italic;
+        }
+        
+        .editor-container {
+            flex: 1;
+            min-height: 500px;
+            border: 1px solid var(--paper-border, #e0e0e0);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .CodeMirror {
+            height: 100%;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 14px;
+        }
+        
+        .poml-output {
+            height: 150px;
+            min-height: 150px;
+            border: 1px solid var(--paper-border, #e0e0e0);
+            border-radius: 8px;
+            padding: 10px;
+            background: var(--paper-header, #f8f8f8);
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        
+        .poml-output h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: var(--paper-accent, #0066cc);
+            font-size: 1.1rem;
+        }
+        
+        .output-content {
+            font-family: 'Consolas', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 13px;
+        }
+        
+        .output-content .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 4px solid #dc3545;
+        }
+        
+        .output-content .success {
+            color: #155724;
+            background: #d4edda;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 4px solid #28a745;
+        }
+        
+        .tool-icon {
+            font-size: 1.2rem;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+    </style>
 </head>
 <body>
     <div class="poml-editor-container">
         <div class="editor-toolbar">
             <div class="tool-group">
-                <button class="btn btn-secondary" id="new-file-btn" title="New File">
-                    <span class="tool-icon">📄</span>
-                </button>
-                <button class="btn btn-secondary" id="open-file-btn" title="Open File">
-                    <span class="tool-icon">📁</span>
-                </button>
-                <button class="btn btn-secondary" id="save-file-btn" title="Save File">
-                    <span class="tool-icon">💾</span>
-                </button>
+                <div class="current-file-info">
+                    <span class="current-file-label">Current File:</span>
+                    <span id="current-file-name" class="current-file-name">New File</span>
+                </div>
             </div>
             <div class="tool-group">
-                <button class="btn btn-secondary" id="format-btn" title="Format">
-                    <span class="tool-icon">🎨</span>
+                <button class="btn btn-secondary" id="new-file-btn" title="New File">
+                    <span class="tool-icon">📄</span> New
+                </button>
+                <button class="btn btn-primary" id="save-file-btn" title="Save File">
+                    <span class="tool-icon">💾</span> Save
                 </button>
                 <button class="btn btn-secondary" id="validate-btn" title="Validate">
-                    <span class="tool-icon">✓</span>
+                    <span class="tool-icon">✓</span> Validate
                 </button>
-                <button class="btn btn-secondary" id="run-poml-btn" title="Run POML">
-                    <span class="tool-icon">▶️</span>
+                <button class="btn btn-primary" id="run-poml-btn" title="Run POML">
+                    <span class="tool-icon">▶️</span> Run
                 </button>
             </div>
         </div>
@@ -42,7 +148,7 @@
         </div>
         <div class="poml-output">
             <h3>Output</h3>
-            <div id="poml-output-content" class="output-content"></div>
+            <div id="poml-output-content" class="output-content">Ready to run POML commands...</div>
         </div>
     </div>
     <script src="static/js/poml-editor.js"></script>

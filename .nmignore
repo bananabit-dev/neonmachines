@@ -1,0 +1,52 @@
+# Neonmachines Ignore File (.nmignore)
+# This file specifies files and directories that should be ignored by Neonmachines
+# Similar to .gitignore syntax
+
+# Ignore log files
+*.log
+logs/
+
+# Ignore temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Ignore backup files
+*.bak
+*.backup
+*~
+
+# Ignore compiled files
+*.exe
+*.o
+*.so
+*.dll
+*.pyc
+__pycache__/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore dependency directories
+node_modules/
+target/
+.git/
+
+# Ignore sensitive files
+*.key
+*.pem
+*.crt
+.env
+.env.local
+
+# Ignore cache files
+.cache/
+*.cache
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db

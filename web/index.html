@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neonmachines Web Interface</title>
-    <link rel="stylesheet" href="static/css/main.css">
+    <link rel="stylesheet" href="static/css/paper-theme.css" id="theme-link">
     <link rel="stylesheet" href="static/css/buttons.css">
-
     <link rel="icon" type="image/x-icon" href="static/favicon.ico">
 </head>
 <body>
@@ -24,9 +23,24 @@
                     <button class="nav-tab" data-tab="poml-editor">POML Editor</button>
                     <button class="nav-tab" data-tab="metrics">Metrics</button>
                     <button class="nav-tab" data-tab="tracing">Tracing</button>
-
                 </nav>
                 <div class="header-actions">
+                    <select id="theme-selector">
+                        <option value="main">Default Theme</option>
+                        <option value="paper" selected>White Paper Theme</option>
+                    </select>
+                    <div class="user-profile">
+                        <div class="avatar-container">
+                            <img id="user-avatar" src="static/default-avatar.png" alt="User Avatar" class="user-avatar">
+                            <input type="file" id="avatar-upload" accept="image/*" style="display: none;">
+                        </div>
+                        <span id="user-name" class="user-name">User</span>
+                    </div>
+                    <div class="poml-file-selector" id="poml-file-selector" style="display: none;">
+                        <select id="poml-file-list">
+                            <option value="">Select POML file...</option>
+                        </select>
+                    </div>
                     <button class="btn btn-secondary" id="save-btn">Save</button>
                     <button class="btn btn-primary" id="run-btn">Run</button>
                 </div>

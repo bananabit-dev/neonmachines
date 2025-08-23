@@ -12,7 +12,7 @@ use std::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, Duration};
 use regex::Regex;
-use tracing::{info, warn, debug, error, instrument};
+use tracing::{info, instrument};
 
 /// Validation result structure for explicit validation responses
 #[derive(Debug, Deserialize, Serialize)]

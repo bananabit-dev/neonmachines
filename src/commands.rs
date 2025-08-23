@@ -370,6 +370,42 @@ pub fn handle_command(
                 text: help_command_fullscreen(),
             });
         }
+        "/create_template" => {
+            let mut parts = it;
+            if let Some(template_type) = parts.next() {
+                if let Some(template_name) = parts.next() {
+                    match template_type {
+                        "mcp" | "tool" => {
+                            // Send command to create template
+                            let _ = tx.send(AppCommand::CreateTemplate {
+                                template_type: template_type.to_string(),
+                                template_name: template_name.to_string(),
+                            });
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: format!("Creating {} template: {}", template_type, template_name),
+                            });
+                        }
+                        _ => {
+                            messages.push(ChatMessage {
+                                from: "system",
+                                text: "Invalid template type. Use 'mcp' or 'tool'.".into(),
+                            });
+                        }
+                    }
+                } else {
+                    messages.push(ChatMessage {
+                        from: "system",
+                        text: "Usage: /create_template <mcp|tool> <name>".into(),
+                    });
+                }
+            } else {
+                messages.push(ChatMessage {
+                    from: "system",
+                    text: "Usage: /create_template <mcp|tool> <name>".into(),
+                });
+            }
+        }
         _ => {
             messages.push(ChatMessage {
                 from: "system",

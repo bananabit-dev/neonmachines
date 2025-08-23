@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POML Loading Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>POML Loading Test</h1>
+        
+        <div>
+            <select id="file-select">
+                <option value="">Select a file...</option>
+                <option value="test1.poml">test1.poml</option>
+                <option value="test2.poml">test2.poml</option>
+                <option value="workflow.poml">workflow.poml</option>
+            </select>
+            <button onclick="loadFile()">Load File</button>
+            <button onclick="testDirectLoad()">Test Direct Load</button>
+            <button onclick="checkStorage()">Check LocalStorage</button>
+            <button onclick="clearStorage()">Clear Storage</button>
+        </div>
+        
+        <div id="output">Output will appear here...</div>
+    </div>
+
+    <script>
+        function log(message) {
+            const output = document.getElementById('output');
+            output.textContent = output.textContent + '\n' + message;
+            console.log(message);
+        }
+
+        function loadFile() {
+            const select = document.getElementById('file-select');
+            const fileName = select.value;
+            
+            if (!fileName) {
+                log('No file selected');
+                return;
+            }
+            
+            log(`Loading file: ${fileName}`);
+            
+            // Check localStorage first
+            const localContent = localStorage.getItem('poml_' + fileName);
+            if (localContent) {
+                log(`Found in localStorage: ${localContent.substring(0, 100)}...`);
+            } else {
+                log('Not found in localStorage, creating sample content');
+                const sampleContent = `name: ${fileName.replace('.poml', '')}
+description: Test POML file
+
+agents:
+  - name: TestAgent
+    type: primary
+    task: "Test task"`;
+                
+                localStorage.setItem('poml_' + fileName, sampleContent);
+                log(`Saved to localStorage: ${sampleContent}`);
+            }
+        }
+
+        function testDirectLoad() {
+            log('Testing direct load to POML editor...');
+            
+            // Check if POML editor instance exists
+            if (window.pomlEditorInstance) {
+                log('Found pomlEditorInstance');
+                if (window.pomlEditorInstance.loadFile) {
+                    log('loadFile method exists');
+                    window.pomlEditorInstance.loadFile('Test content', 'test.poml');
+                } else {
+                    log('loadFile method not found');
+                }
+            } else {
+                log('pomlEditorInstance not found');
+            }
+            
+            // Check if global function exists
+            if (window.loadPomlFromDropdown) {
+                log('Found loadPomlFromDropdown function');
+                window.loadPomlFromDropdown('Test content', 'test.poml');
+            } else {
+                log('loadPomlFromDropdown function not found');
+            }
+        }
+
+        function checkStorage() {
+            log('Checking localStorage...');
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('poml_')) {
+                    const value = localStorage.getItem(key);
+                    log(`${key}: ${value.substring(0, 50)}...`);
+                }
+            }
+        }
+
+        function clearStorage() {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('poml_')) {
+                    keys.push(key);
+                }
+            }
+            keys.forEach(key => localStorage.removeItem(key));
+            log(`Cleared ${keys.length} POML files from localStorage`);
+        }
+
+        // Initial log
+        log('Test page loaded');
+    </script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+name: "Advanced Coding Agent"
+model: "gpt-4"
+temperature: 0.7
+maximum_traversals: 15
+working_dir: "."
+active_agent_index: 0
+
+# Primary coding agent - generates initial implementation
+- agent_type: Agent
+  files: "system:prompts/coding_agent.poml,user:prompts/chat_user.poml"
+  max_iterations: 5
+  iteration_delay_ms: 300
+  input_injections: []
+  output_injections: []
+
+# Security analyzer agent - checks for vulnerabilities
+- agent_type: Agent
+  files: "system:prompts/security_vulnerability_analyzer.poml,user:prompts/chat_user.poml"
+  max_iterations: 3
+  iteration_delay_ms: 200
+  input_injections: ["input2:security_check"]
+
+# Code validator agent - validates syntax and logic
+- agent_type: Validator
+  files: "system:prompts/cargo_validator.poml,user:prompts/chat_user.poml"
+  max_iterations: 2
+  iteration_delay_ms: 100
+  input_injections: []
+
+# Documentation generator agent - creates documentation
+- agent_type: Agent
+  files: "system:prompts/chat_system.poml,user:prompts/chat_user.poml"
+  max_iterations: 2
+  iteration_delay_ms: 150
+  input_injections: ["input2:documentation"]
