@@ -449,6 +449,7 @@ pub async fn handle_websocket_connection(ws: WebSocket) {
                                             prompt: prompt.to_string(),
                                             cfg: cfg.clone(),
                                             start_agent: None,
+                                            variables: Some(app.variables.clone()),
                                         });
                                         
                                         let response = UiResponse {
@@ -492,6 +493,7 @@ pub async fn handle_websocket_connection(ws: WebSocket) {
                                             prompt: "Run all".to_string(),
                                             cfg: cfg.clone(),
                                             start_agent: None,
+                                            variables: Some(app.variables.clone()),
                                         });
                                         started_count += 1;
                                     }
@@ -557,6 +559,7 @@ pub async fn handle_websocket_connection(ws: WebSocket) {
                                         prompt: cmd.payload.get("prompt").and_then(|v| v.as_str()).unwrap_or("Execute POML workflow").to_string(),
                                         cfg: temp_cfg,
                                         start_agent: None,
+                                        variables: Some(app.variables.clone()),
                                     });
                                     
                                     let response = UiResponse {

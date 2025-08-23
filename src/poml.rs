@@ -4,6 +4,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use anyhow::Result;
 use tokio::process::Command;
 use std::process::Stdio;
+use std::collections::HashMap;
 
 pub struct PomlExecutor {
     tx: UnboundedSender<AppEvent>,
@@ -14,7 +15,7 @@ impl PomlExecutor {
         Self { tx }
     }
 
-    pub async fn execute_poml_file(&self, file_path: &PathBuf, working_dir: Option<PathBuf>) -> Result<()> {
+    pub async fn execute_poml_file(&self, file_path: &PathBuf, working_dir: Option<PathBuf>, variables: Option<HashMap<String, String>>) -> Result<()> {
         // Check if file exists
         if !file_path.exists() {
             let _ = self.tx.send(AppEvent::Log(format!("Error: POML file not found: {}", file_path.display())));
@@ -42,6 +43,13 @@ impl PomlExecutor {
 
         // Add environment variables that might be needed
         command.env("POML_WORKING_DIR", current_dir.display().to_string());
+        
+        // Add user-defined variables as environment variables
+        if let Some(vars) = variables {
+            for (key, value) in vars {
+                command.env(format!("POML_VAR_{}", key.to_uppercase()), value);
+            }
+        }
 
         // Set up stdout and stderr capture
         command.stdout(Stdio::piped());
@@ -164,8 +172,9 @@ impl PomlExecutor {
 pub async fn handle_poml_execution(
     file_path: &PathBuf,
     working_dir: Option<PathBuf>,
+    variables: Option<HashMap<String, String>>,
     tx: UnboundedSender<AppEvent>,
 ) -> Result<()> {
     let executor = PomlExecutor::new(tx);
-    executor.execute_poml_file(file_path, working_dir).await
+    executor.execute_poml_file(file_path, working_dir, variables).await
 }

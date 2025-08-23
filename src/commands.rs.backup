@@ -11,9 +11,8 @@ pub fn handle_command(
     tx: &UnboundedSender<AppCommand>,
     messages: &mut Vec<ChatMessage>,
     selected_agent: &mut Option<usize>,
-    mode: &mut Mode,
-    variables: &mut HashMap<String, String>,
-    messages_scroll: &mut u16,
+    mode: &mut Mode, // Add this parameter
+    variables: &mut HashMap<String, String>, // Add variables parameter
 ) {
     let mut it = line.split_whitespace();
     let cmd = it.next().unwrap_or("");
@@ -57,7 +56,6 @@ pub fn handle_command(
                             prompt: "Run all".into(),
                             cfg: wf,
                             start_agent: selected_agent.map(|idx| idx as i32),
-                            variables: Some(variables.clone()),
                         });
                     }
                     messages.push(ChatMessage {
@@ -78,7 +76,6 @@ pub fn handle_command(
                         prompt: prompt.clone(),
                         cfg,
                         start_agent: selected_agent.map(|idx| idx as i32),
-                        variables: Some(variables.clone()),
                     });
                     *active_workflow = name.to_string();
                     messages.push(ChatMessage {
@@ -416,17 +413,6 @@ pub fn handle_command(
                 }
             }
         }
-        "/help" => {
-            help_command(messages);
-        }
-        "/scroll" => {
-            // Scroll to the newest line of text
-            *messages_scroll = messages.len() as u16;
-            messages.push(ChatMessage {
-                from: "system",
-                text: "Scrolled to the newest message.".to_string(),
-            });
-        }
         _ => {
             messages.push(ChatMessage {
                 from: "system",
@@ -453,7 +439,6 @@ fn help_command_fullscreen() -> String {
 /history [agent|all] - Show execution history
 /trace [on|off|show] - Enable/disable/view tracing
 /let [name=value]    - Set or list variables
-/scroll              - Scroll to the newest line of text
 /help                - Show this help message (you're here!)
 
 🎮 NAVIGATION:
@@ -485,44 +470,4 @@ Tab - Command completion
 Press any key to continue...
 "#;
     help_text.to_string()
-}
-
-fn help_command(messages: &mut Vec<ChatMessage>) {
-    let help_text = r#"
-Available commands:
-
-/cwd [path]          - Show or set working directory
-/run [workflow|all] [prompt] - Run a workflow or all workflows
-/save                - Save all workflows to config.nm
-/create [name]       - Create or edit a workflow
-/workflow            - Enter workflow selection mode
-/options             - Enter options mode for poml template input
-/chat                - Enter interactive chat mode
-/agent [number|none|list] - Select agent for routing
-/history [agent|all] - Show execution history
-/trace [on|off|show] - Enable/disable/view tracing
-/let [name=value]    - Set or list variables
-/scroll              - Scroll to the newest line of text
-/help                - Show this help message
-
-Navigation:
-Enter - Submit message
-Shift+Enter - Insert newline
-Ctrl+C or Ctrl+D - Quit
-Ctrl+L - Clear screen
-Tab - Command completion
-
-Examples:
-/run myworkflow "Process this data"
-/agent 2 - Select agent 2 for routing
-/agent none - Use default routing
-/create newworkflow - Create new workflow named 'newworkflow'
-/options - Enter options mode for poml template input
-/trace on - Enable API call tracing
-/let primary_task="fix security vulnerabilities" - Set primary task
-"#;
-    messages.push(ChatMessage {
-        from: "system",
-        text: help_text.to_string(),
-    });
 }

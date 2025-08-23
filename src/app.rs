@@ -58,6 +58,7 @@ pub struct App {
     pub command_history: Vec<String>,
     pub history_index: usize,
     pub saved_input: String,
+    pub variables: HashMap<String, String>, // Store user-defined variables
 }
 
 impl App {
@@ -100,6 +101,7 @@ impl App {
             command_history: Vec::new(),
             history_index: 0,
             saved_input: String::new(),
+            variables: HashMap::new(), // Initialize empty variables map
         }
     }
 
@@ -303,7 +305,7 @@ impl App {
                 // Tab completion for commands
                 if self.mode == Mode::Chat && self.input.starts_with('/') {
                     // Simple tab completion logic
-                    let commands = vec!["help", "workflow", "create", "run", "chat", "history", "agent"];
+                    let commands = vec!["help", "workflow", "create", "run", "chat", "history", "agent", "scroll"];
                     let input = self.input.to_lowercase();
                     for cmd in commands {
                         if cmd.starts_with(&input[1..]) {
@@ -503,6 +505,8 @@ impl App {
                 &mut self.messages,
                 &mut self.selected_agent, // Pass the mutable reference
                 &mut self.mode,          // Pass the mutable mode reference
+                &mut self.variables,     // Pass the variables reference
+                &mut self.messages_scroll, // Pass the messages_scroll reference
             );
         } else {
             // ... (rest of the else block for non-command input)
@@ -514,6 +518,7 @@ impl App {
                     prompt: line.clone(),
                     cfg: cfg.clone(),
                     start_agent: start_agent_i32, // Use the converted value
+                    variables: Some(self.variables.clone()), // Pass the variables
                 });
                 self.add_message("system", format!("Running workflow '{}' with prompt: {}", cfg.name, line));
             } else {

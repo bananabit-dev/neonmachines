@@ -202,6 +202,7 @@ pub enum AppCommand {
         prompt: String,
         cfg: crate::nm_config::WorkflowConfig,
         start_agent: Option<i32>,
+        variables: Option<std::collections::HashMap<String, String>>, // Add variables parameter
     },
     ShowHistory {
         agent_index: Option<i32>,
@@ -290,7 +291,7 @@ pub async fn run_workflow(
             }
         }
 
-        AppCommand::RunWorkflow { workflow_name, prompt, cfg, start_agent } => {
+        AppCommand::RunWorkflow { workflow_name, prompt, cfg, start_agent, variables } => {
             let _ = log_tx.send(AppEvent::RunStart(workflow_name.clone()));
             let _ = log_tx.send(AppEvent::Log(format!(
                 "Starting workflow '{}' with prompt: {}", 
@@ -339,6 +340,7 @@ pub async fn run_workflow(
                                 row.max_iterations,
                                 log_tx.clone(),
                                 shared_history.clone(),
+                                variables.clone(), // Pass variables from workflow
                             ),
                             row.on_success.unwrap_or(-1),
                             row.on_failure.unwrap_or(-1),
@@ -352,6 +354,7 @@ pub async fn run_workflow(
                             row.max_iterations,
                             log_tx.clone(),
                             shared_history.clone(),
+                            variables.clone(), // Pass variables from workflow
                         ))
                     };
 

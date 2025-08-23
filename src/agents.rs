@@ -128,10 +128,15 @@ fn run_poml_file_with_vars(
         return format!("Failed to update {}: {}", file, e);
     }
 
-    let result = match Command::new("python")
-        .args(["-m", "poml", "-f", &path])
-        .output()
-    {
+    let mut command = Command::new("python");
+    command.args(["-m", "poml", "-f", &path]);
+    
+    // Add user-defined variables as environment variables
+    for (key, value) in vars {
+        command.env(format!("POML_VAR_{}", key.to_uppercase()), value);
+    }
+
+    let result = match command.output() {
         Ok(output) => {
             if output.status.success() {
                 String::from_utf8_lossy(&output.stdout).to_string()
@@ -162,6 +167,7 @@ pub struct PomlAgent {
     pub latest_user_input: Option<String>, // ✅ track latest user input
     pub shared_history: SharedHistory,
     pub history: Vec<Message>,
+    pub variables: Option<HashMap<String, String>>, // Store user-defined variables
 }
 
 impl PomlAgent {
@@ -173,6 +179,7 @@ impl PomlAgent {
         max_iterations: usize,
         tx: UnboundedSender<AppEvent>,
         shared_history: SharedHistory,
+        variables: Option<HashMap<String, String>>, // Add variables parameter
     ) -> Self {
         Self {
             name: name.to_string(),
@@ -186,6 +193,7 @@ impl PomlAgent {
             iteration_delay_ms: 200,
             tx,
             shared_history,
+            variables, // Store variables
         }
     }
 
@@ -193,6 +201,13 @@ impl PomlAgent {
     fn load_system_message(&self, user_input: &str, last_output: &str) -> Message {
         let mut system_content = String::new();
         let mut vars = HashMap::new();
+
+        // Add user-defined variables
+        if let Some(agent_vars) = &self.variables {
+            for (key, value) in agent_vars {
+                vars.insert(key.clone(), value.clone());
+            }
+        }
 
         if let Some(user_input) = &self.latest_user_input {
             vars.insert("nminput".to_string(), user_input.clone());

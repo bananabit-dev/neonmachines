@@ -114,7 +114,7 @@ async fn main() -> Result<()> {
         info!("Executing POML file: {}", poml_file.display());
         let (tx_evt, _) = mpsc::unbounded_channel::<AppEvent>();
         let working_dir = cli.working_dir.clone();
-        match handle_poml_execution(poml_file, working_dir, tx_evt).await {
+        match handle_poml_execution(poml_file, working_dir, None, tx_evt).await {
             Ok(_) => {
                 info!("POML execution completed successfully");
                 println!("POML execution completed successfully");
