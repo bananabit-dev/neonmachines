@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use unicode_segmentation::UnicodeSegmentation;
 use std::collections::VecDeque;
+use crossterm::event::Event::Key;
+
 
 pub struct ChatMessage {
     pub from: &'static str,
@@ -125,19 +127,19 @@ impl App {
         
         // Handle key events immediately without blocking
         match ev {
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
+            Key(KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 // Immediately return true to quit, no need to process further
                 return true;
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('l'), modifiers: KeyModifiers::CONTROL, .. }) => {
+            Key(KeyEvent { code: KeyCode::Char('l'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 // Clear screen with Ctrl+L
                 self.messages_scroll = 0;
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, .. }) => {
+            Key(KeyEvent { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, .. }) => {
                 // Ctrl+D to quit (alternative to Ctrl+C)
                 return true;
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
+            Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
                 // Handle character input based on mode
                 match self.mode {
                     Mode::Create => {
@@ -159,11 +161,11 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, .. }) => {
+            Key(KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, .. }) => {
                 // Insert newline instead of submitting
                 self.insert_char('\n');
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+            Key(KeyEvent { code: KeyCode::Enter, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_submit();
@@ -185,7 +187,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
+            Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_backspace();
@@ -198,7 +200,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Left, .. }) => {
+            Key(KeyEvent { code: KeyCode::Left, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_left();
@@ -215,7 +217,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Right, .. }) => {
+            Key(KeyEvent { code: KeyCode::Right, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_right();
@@ -232,7 +234,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
+            Key(KeyEvent { code: KeyCode::Up, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_up();
@@ -257,7 +259,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            Key(KeyEvent { code: KeyCode::Down, .. }) => {
                 match self.mode {
                     Mode::Create => {
                         self.handle_create_down();
@@ -281,7 +283,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::PageUp, .. }) => {
+            Key(KeyEvent { code: KeyCode::PageUp, .. }) => {
                 match self.mode {
                     Mode::Chat => {
                         // Scroll messages up by 10 lines
@@ -290,7 +292,7 @@ impl App {
                     _ => {}
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::PageDown, .. }) => {
+            Key(KeyEvent { code: KeyCode::PageDown, .. }) => {
                 match self.mode {
                     Mode::Chat => {
                         // Scroll messages down by 10 lines
@@ -299,7 +301,7 @@ impl App {
                     _ => {}
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Home, modifiers: KeyModifiers::CONTROL, .. }) => {
+            Key(KeyEvent { code: KeyCode::Home, modifiers: KeyModifiers::CONTROL, .. }) => {
                 match self.mode {
                     Mode::Chat => {
                         // Scroll to top of messages
@@ -308,7 +310,7 @@ impl App {
                     _ => {}
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::End, modifiers: KeyModifiers::CONTROL, .. }) => {
+            Key(KeyEvent { code: KeyCode::End, modifiers: KeyModifiers::CONTROL, .. }) => {
                 match self.mode {
                     Mode::Chat => {
                         // Scroll to bottom of messages (newest)
@@ -317,7 +319,7 @@ impl App {
                     _ => {}
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Esc, .. }) => {
+            Key(KeyEvent { code: KeyCode::Esc, .. }) => {
                 // Exit special modes
                 match self.mode {
                     Mode::Create | Mode::Workflow | Mode::Options => {
@@ -337,7 +339,7 @@ impl App {
                     }
                 }
             }
-            crossterm::event::Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
+            Key(KeyEvent { code: KeyCode::Tab, .. }) => {
                 // Tab completion for commands
                 if self.mode == Mode::Chat && self.input.starts_with('/') {
                     // Simple tab completion logic
